@@ -1,0 +1,7 @@
+---
+- name: Process {{ serviceflow_phase.action }} services
+  ansible.builtin.include_tasks: service.yml
+  loop: "{{ serviceflow_phase.services }}"
+  loop_control:
+    loop_var: serviceflow_current_service
+    label: "{{ serviceflow_current_service.name }}"

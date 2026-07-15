@@ -7,6 +7,9 @@ from ansible.errors import AnsibleFilterError
 
 
 _ALLOWED_ACTIONS = ("start", "stop", "restart")
+_ALLOWED_SERVICE_FIELDS = frozenset(
+    {"name", "unit", "groups", "exclude_groups", "manage"}
+)
 
 
 def _fail(message):
@@ -92,6 +95,12 @@ def serviceflow_plan(services, inventory_groups, action):
         field = f"serviceflow_services[{index}]"
         if not isinstance(service, Mapping):
             _fail(f"{field} must be a mapping")
+
+        unsupported = sorted(
+            str(key) for key in service if key not in _ALLOWED_SERVICE_FIELDS
+        )
+        if unsupported:
+            _fail(f"{field} contains unsupported fields: {', '.join(unsupported)}")
 
         name = _text(service.get("name"), f"{field}.name")
         if name in service_names:

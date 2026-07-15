@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,3 +41,43 @@ jobs:
         run: |
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook -i localhost, -c local tests/planner_smoke.yml
+      - name: Lifecycle role syntax
+        run: |
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook --syntax-check \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml
+      - name: Sequential systemd lifecycle integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'bash tests/systemd_fixture.sh cleanup' EXIT
+
+          bash tests/systemd_fixture.sh setup
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=restart
+          diff -u \
+            <(printf 'stop-beta\nstop-alpha\nstart-alpha\nstart-beta\n') \
+            /tmp/serviceflow-order.log
+
+          bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook --check \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=start
+          test "$(systemctl is-active serviceflow-alpha.service || true)" = inactive
+          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
+          test ! -s /tmp/serviceflow-order.log
+
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=start
+          diff -u \
+            <(printf 'start-alpha\nstart-beta\n') \
+            /tmp/serviceflow-order.log

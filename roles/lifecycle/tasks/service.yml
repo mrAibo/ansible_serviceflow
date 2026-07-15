@@ -1,0 +1,7 @@
+---
+- name: Process {{ serviceflow_current_service.name }} hosts
+  ansible.builtin.include_tasks: host.yml
+  loop: "{{ serviceflow_current_service.hosts }}"
+  loop_control:
+    loop_var: serviceflow_target_host
+    label: "{{ serviceflow_target_host }}"
