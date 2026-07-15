@@ -4,24 +4,24 @@
   gather_facts: false
   vars:
     planner_groups:
-      modeshape:
-        - modeshape01
-      web:
-        - web01
+      backend:
+        - backend01
+      frontend:
+        - frontend01
         - shared01
-      tobi:
+      edge:
         - shared01
-        - tobi01
+        - edge01
     planner_services:
-      - name: modeshape
+      - name: backend
         groups:
-          - modeshape
-        unit: xout-modeshape.service
-      - name: web
+          - backend
+        unit: example-backend.service
+      - name: frontend
         groups:
-          - web
-          - tobi
-        unit: xout-web.service
+          - frontend
+          - edge
+        unit: example-frontend.service
   tasks:
     - name: Build restart plan
       ansible.builtin.set_fact:
@@ -38,7 +38,7 @@
       ansible.builtin.assert:
         that:
           - planner_result.phases | map(attribute='action') | list == ['stop', 'start']
-          - planner_result.phases[0].services | map(attribute='name') | list == ['web', 'modeshape']
-          - planner_result.phases[1].services | map(attribute='name') | list == ['modeshape', 'web']
-          - planner_result.phases[1].services[1].hosts == ['web01', 'shared01', 'tobi01']
+          - planner_result.phases[0].services | map(attribute='name') | list == ['frontend', 'backend']
+          - planner_result.phases[1].services | map(attribute='name') | list == ['backend', 'frontend']
+          - planner_result.phases[1].services[1].hosts == ['frontend01', 'shared01', 'edge01']
           - planner_result.skipped == []

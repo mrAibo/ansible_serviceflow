@@ -4,7 +4,7 @@
 
 The first ServiceFlow release uses one ordered list of services. The list order is the start order. Stop reverses the list. Restart performs the complete stop sequence and then the complete start sequence.
 
-A general dependency graph is deliberately deferred. The ordered model covers the first real XOUT workflow with less code, fewer validation rules and predictable operator output.
+A general dependency graph is deliberately deferred. The ordered model covers the first real multi-host workflow with less code, fewer validation rules and predictable operator output.
 
 ## Execution model
 
@@ -47,11 +47,10 @@ Hooks reference normal Ansible task files supplied by the consuming project:
 ```yaml
 hooks:
   before_stop:
-    - name: Stop portal modules
-      tasks: hooks/portal_stop_modules.yml
-      on_error: fail
+    - name: Prepare application shutdown
+      tasks: hooks/prepare_shutdown.yml
       vars:
-        portal_jolokia_port: 5000
+        shutdown_timeout: 60
 ```
 
 Supported MVP phases are:
@@ -95,6 +94,6 @@ The MVP does not provide:
 - arbitrary dependency graphs;
 - parallel, rolling or batched execution;
 - automatic dependency discovery;
-- application-specific XOUT or Jolokia behavior;
+- application-specific integrations;
 - container, Kubernetes or Windows service management;
 - external Python dependencies.

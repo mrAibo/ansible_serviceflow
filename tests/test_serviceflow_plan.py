@@ -26,36 +26,36 @@ def service_names(plan, phase_index=0):
 
 def main():
     groups = {
-        "modeshape": ["modeshape01"],
-        "web": ["web01", "shared01"],
-        "tobi": ["shared01", "tobi01"],
+        "backend": ["backend01"],
+        "frontend": ["frontend01", "shared01"],
+        "edge": ["shared01", "edge01"],
         "maintenance": ["shared01"],
     }
     services = [
         {
-            "name": "modeshape",
-            "groups": ["modeshape"],
-            "unit": "xout-modeshape.service",
+            "name": "backend",
+            "groups": ["backend"],
+            "unit": "example-backend.service",
         },
         {
-            "name": "web",
-            "groups": ["web", "tobi"],
+            "name": "frontend",
+            "groups": ["frontend", "edge"],
             "exclude_groups": ["maintenance"],
-            "unit": "xout-web.service",
+            "unit": "example-frontend.service",
         },
     ]
 
     start = MODULE.serviceflow_plan(services, groups, "start")
-    assert service_names(start) == ["modeshape", "web"]
-    assert start["phases"][0]["services"][1]["hosts"] == ["web01", "tobi01"]
+    assert service_names(start) == ["backend", "frontend"]
+    assert start["phases"][0]["services"][1]["hosts"] == ["frontend01", "edge01"]
 
     stop = MODULE.serviceflow_plan(services, groups, "stop")
-    assert service_names(stop) == ["web", "modeshape"]
+    assert service_names(stop) == ["frontend", "backend"]
 
     restart = MODULE.serviceflow_plan(services, groups, "restart")
     assert [phase["action"] for phase in restart["phases"]] == ["stop", "start"]
-    assert service_names(restart, 0) == ["web", "modeshape"]
-    assert service_names(restart, 1) == ["modeshape", "web"]
+    assert service_names(restart, 0) == ["frontend", "backend"]
+    assert service_names(restart, 1) == ["backend", "frontend"]
 
     optional = services + [
         {
@@ -67,7 +67,7 @@ def main():
     ]
     skipped = MODULE.serviceflow_plan(optional, groups, "start")
     assert skipped["skipped"] == [{"name": "optional", "reason": "manage=false"}]
-    assert service_names(skipped) == ["modeshape", "web"]
+    assert service_names(skipped) == ["backend", "frontend"]
 
     expect_error("unsupported action", services, groups, "reload")
     expect_error(
@@ -87,8 +87,8 @@ def main():
         [
             {
                 "name": "excluded",
-                "groups": ["web"],
-                "exclude_groups": ["web"],
+                "groups": ["frontend"],
+                "exclude_groups": ["frontend"],
                 "unit": "excluded.service",
             }
         ],
@@ -100,7 +100,7 @@ def main():
         [
             {
                 "name": "bad-manage",
-                "groups": ["web"],
+                "groups": ["frontend"],
                 "unit": "bad.service",
                 "manage": "false",
             }
@@ -113,7 +113,7 @@ def main():
         [
             {
                 "name": "unsafe",
-                "groups": ["web"],
+                "groups": ["frontend"],
                 "unit": "unsafe.service",
                 "hooks": {},
                 "ready": {"type": "systemd"},
