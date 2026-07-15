@@ -1,0 +1,21 @@
+---
+namespace: mraibo
+name: serviceflow
+version: 0.1.0
+readme: README.md
+authors:
+  - Aleksej Voronin (@mrAibo)
+description: Ordered systemd service lifecycle orchestration for Ansible.
+license:
+  - GPL-3.0-or-later
+tags:
+  - systemd
+  - services
+  - orchestration
+  - lifecycle
+  - system
+repository: https://github.com/mrAibo/ansible_serviceflow
+issues: https://github.com/mrAibo/ansible_serviceflow/issues
+build_ignore:
+  - .gitignore
+  - .github
