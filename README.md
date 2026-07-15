@@ -1,1 +1,65 @@
-# ansible_serviceflow
+# Ansible ServiceFlow
+
+Dependency-aware systemd service lifecycle orchestration for Ansible.
+
+> **Status:** early design and MVP development. The interface below is the target contract and is not released yet.
+
+ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
+
+## Problem
+
+A conventional playbook often grows into repeated `shell: systemctl ...`, group-based `when` expressions, manual reverse ordering, log manipulation and application-specific tasks mixed into one long file.
+
+ServiceFlow will keep the application definition declarative:
+
+```yaml
+serviceflow_action: restart
+
+serviceflow_services:
+  - name: modeshape
+    groups: [modeshape]
+    unit: xout-modeshape.service
+    ready:
+      type: log
+      path: /var/log/xout/modeshape/server.log
+      regex: 'Started ModeShapeServer in'
+      timeout: 300
+
+  - name: activemq
+    groups: [activemq]
+    unit: xout-activemq-artemis.service
+
+  - name: portal
+    groups: [portal]
+    unit: xout-portal.service
+    hooks:
+      before_stop:
+        - tasks: hooks/portal_stop_modules.yml
+
+  - name: web
+    groups: [web, tobi]
+    unit: xout-web.service
+```
+
+The declared order is the start order. Stop uses the exact reverse order. Restart performs a complete stop followed by a complete start.
+
+## MVP
+
+The first release is limited to:
+
+- ordered start and reverse-order stop;
+- restart as full stop plus full start;
+- target resolution from inventory groups;
+- `manage` and `exclude_groups` selection;
+- native task-file hooks around service transitions;
+- readiness through systemd state or a new log entry;
+- check-mode planning;
+- structured results and clear validation errors.
+
+Arbitrary dependency graphs, parallel execution, rolling restarts, containers and platform-specific application integrations are intentionally deferred.
+
+See [the MVP design](docs/DESIGN.md) and [issue #1](https://github.com/mrAibo/ansible_serviceflow/issues/1).
+
+## License
+
+GPL-3.0-or-later.
