@@ -46,7 +46,7 @@ def _names(value, field):
 
 
 def _positive_integer(value, field):
-    if type(value) is not int or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         _fail(f"{field} must be a positive integer")
     return value
 
