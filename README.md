@@ -41,6 +41,8 @@ serviceflow_services:
     unit: xout-web.service
 ```
 
+The `ready` and `hooks` fields above show the target MVP interface. Until their implementation lands, the planner rejects them instead of silently changing services without the requested safeguards.
+
 The declared order is the start order. Stop uses the exact reverse order. Restart performs a complete stop followed by a complete start.
 
 ## MVP
