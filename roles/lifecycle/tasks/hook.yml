@@ -1,0 +1,34 @@
+---
+- name: Run {{ serviceflow_current_hook.name }}
+  ansible.builtin.include_tasks:
+    file: >-
+      {{
+        serviceflow_current_hook.tasks
+        if serviceflow_current_hook.tasks.startswith('/')
+        else playbook_dir ~ '/' ~ serviceflow_current_hook.tasks
+      }}
+    apply:
+      delegate_to: "{{ serviceflow_target_host }}"
+      become: "{{ serviceflow_become }}"
+  vars: "{{ serviceflow_current_hook.vars }}"
+
+- name: Record executed hook
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'hooks': serviceflow_result.hooks
+              + [
+                  {
+                    'phase': serviceflow_hook_phase,
+                    'name': serviceflow_current_hook.name,
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host
+                  }
+                ]
+            }
+          )
+      }}
