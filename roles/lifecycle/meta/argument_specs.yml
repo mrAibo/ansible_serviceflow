@@ -1,0 +1,54 @@
+---
+argument_specs:
+  main:
+    short_description: Execute an ordered systemd service lifecycle
+    description:
+      - Validates and executes ordered start, reverse-order stop, or full restart phases.
+      - Resolves service targets from Ansible inventory groups.
+    options:
+      serviceflow_action:
+        description: Lifecycle action to execute.
+        type: str
+        choices:
+          - start
+          - stop
+          - restart
+        default: start
+      serviceflow_services:
+        description: Ordered service definitions.
+        type: list
+        elements: dict
+        required: true
+        options:
+          name:
+            description: Unique logical service name.
+            type: str
+            required: true
+          unit:
+            description: systemd unit name.
+            type: str
+            required: true
+          groups:
+            description: Inventory groups whose hosts run the unit.
+            type: list
+            elements: str
+            required: true
+          exclude_groups:
+            description: Inventory groups whose hosts are excluded.
+            type: list
+            elements: str
+            default: []
+          manage:
+            description: Whether the complete service entry is managed.
+            type: bool
+            default: true
+          hooks:
+            description: Native task-file hooks keyed by lifecycle phase.
+            type: dict
+          ready:
+            description: Optional systemd or new-log-entry readiness definition.
+            type: dict
+      serviceflow_become:
+        description: Use privilege escalation for service, hook, and readiness operations.
+        type: bool
+        default: true
