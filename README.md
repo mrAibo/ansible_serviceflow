@@ -2,7 +2,7 @@
 
 Dependency-aware systemd service lifecycle orchestration for Ansible.
 
-> **Status:** The version 0.1.0 MVP is functionally implemented and undergoing external acceptance before its first release.
+> **Status:** Version 0.1.0 is released after successful external acceptance testing.
 
 ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
 
@@ -131,7 +131,7 @@ A readiness failure stops the lifecycle before the next service is processed. A 
 
 Successful and skipped checks are returned in `serviceflow_result.readiness`. Log results include bytes examined, elapsed time, rotation and truncation counts, without returning log contents.
 
-## MVP scope
+## Version 0.1.0 scope
 
 Version 0.1.0 includes:
 
