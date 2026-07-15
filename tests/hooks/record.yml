@@ -1,0 +1,17 @@
+---
+- name: Verify hook context
+  ansible.builtin.assert:
+    that:
+      - serviceflow_hook_context.target_host == serviceflow_target_host
+      - serviceflow_hook_context.service == serviceflow_current_service.name
+      - serviceflow_hook_context.phase in ['before_start', 'before_stop', 'after_stop']
+
+- name: Record lifecycle hook marker
+  ansible.builtin.command:
+    argv:
+      - tee
+      - -a
+      - /tmp/serviceflow-order.log
+    stdin: "{{ serviceflow_hook_vars.hook_marker }}"
+    stdin_add_newline: true
+  changed_when: true

@@ -1,0 +1,17 @@
+---
+- name: Verify hook failures stop the lifecycle
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: stop
+    serviceflow_services:
+      - name: alpha
+        groups:
+          - alpha
+        unit: serviceflow-alpha.service
+        hooks:
+          before_stop:
+            - name: Reject shutdown
+              tasks: hooks/fail.yml
+  roles:
+    - role: mraibo.serviceflow.lifecycle

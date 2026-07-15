@@ -2,7 +2,7 @@
 
 Dependency-aware systemd service lifecycle orchestration for Ansible.
 
-> **Status:** MVP development. The planner and lifecycle role now validate service definitions, resolve inventory-group hosts, and execute deterministic start, stop and restart phases with native systemd check mode and structured results. Hooks and readiness are not implemented yet.
+> **Status:** MVP development. The planner and lifecycle role validate service definitions, resolve inventory-group hosts, execute deterministic start, stop and restart phases, and run transition-aware task-file hooks. Readiness is not implemented yet.
 
 ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
 
@@ -10,7 +10,7 @@ ServiceFlow is intended for applications whose services run on different invento
 
 A conventional playbook often grows into repeated `shell: systemctl ...`, group-based `when` expressions, manual reverse ordering, log manipulation and application-specific tasks mixed into one long file.
 
-ServiceFlow will keep the application definition declarative:
+ServiceFlow keeps the application definition declarative:
 
 ```yaml
 serviceflow_action: restart
@@ -19,11 +19,6 @@ serviceflow_services:
   - name: backend
     groups: [backend]
     unit: example-backend.service
-    ready:
-      type: log
-      path: /var/log/example/backend.log
-      regex: 'Application ready'
-      timeout: 300
 
   - name: worker
     groups: [worker]
@@ -34,16 +29,43 @@ serviceflow_services:
     unit: example-api.service
     hooks:
       before_stop:
-        - tasks: hooks/prepare_shutdown.yml
+        - name: Prepare application shutdown
+          tasks: hooks/prepare_shutdown.yml
+          vars:
+            timeout: 60
 
   - name: frontend
     groups: [frontend, edge]
     unit: example-frontend.service
 ```
 
-The `ready` and `hooks` fields above show the target MVP interface. Until their implementation lands, the planner rejects them instead of silently changing services without the requested safeguards.
-
 The declared order is the start order. Stop uses the exact reverse order. Restart performs a complete stop followed by a complete start.
+
+## Hooks
+
+The implemented hook phases are:
+
+- `before_start`
+- `before_stop`
+- `after_stop`
+
+Relative task paths are resolved from the consuming playbook directory. Hook tasks execute on the current service target host by default and retain normal Ansible behavior.
+
+Hook variables are available through `serviceflow_hook_vars`. Lifecycle details are available through `serviceflow_hook_context`:
+
+```yaml
+---
+- name: Show shutdown context
+  ansible.builtin.debug:
+    msg: >-
+      Preparing {{ serviceflow_hook_context.service }} on
+      {{ serviceflow_hook_context.target_host }} with timeout
+      {{ serviceflow_hook_vars.timeout }} seconds
+```
+
+Hooks run only when the requested systemd state requires a real transition. They do not run in check mode or for an already satisfied state. A hook failure aborts the lifecycle before the following service operation; errors are never suppressed implicitly.
+
+Readiness and the future `after_ready` phase are intentionally rejected until readiness boundaries are implemented and tested.
 
 ## MVP
 

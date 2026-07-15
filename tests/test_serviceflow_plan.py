@@ -36,6 +36,15 @@ def main():
             "name": "backend",
             "groups": ["backend"],
             "unit": "example-backend.service",
+            "hooks": {
+                "before_stop": [
+                    {
+                        "name": "Prepare shutdown",
+                        "tasks": "hooks/prepare_shutdown.yml",
+                        "vars": {"timeout": 60},
+                    }
+                ]
+            },
         },
         {
             "name": "frontend",
@@ -48,6 +57,15 @@ def main():
     start = MODULE.serviceflow_plan(services, groups, "start")
     assert service_names(start) == ["backend", "frontend"]
     assert start["phases"][0]["services"][1]["hosts"] == ["frontend01", "edge01"]
+    assert start["phases"][0]["services"][0]["hooks"] == {
+        "before_stop": [
+            {
+                "name": "Prepare shutdown",
+                "tasks": "hooks/prepare_shutdown.yml",
+                "vars": {"timeout": 60},
+            }
+        ]
+    }
 
     stop = MODULE.serviceflow_plan(services, groups, "stop")
     assert service_names(stop) == ["frontend", "backend"]
@@ -109,14 +127,43 @@ def main():
         "start",
     )
     expect_error(
-        "unsupported fields: hooks, ready",
+        "unsupported fields: ready",
         [
             {
                 "name": "unsafe",
                 "groups": ["frontend"],
                 "unit": "unsafe.service",
-                "hooks": {},
                 "ready": {"type": "systemd"},
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "unsupported phases: after_ready",
+        [
+            {
+                "name": "bad-phase",
+                "groups": ["frontend"],
+                "unit": "bad-phase.service",
+                "hooks": {"after_ready": []},
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "unsupported fields: on_error",
+        [
+            {
+                "name": "bad-hook",
+                "groups": ["frontend"],
+                "unit": "bad-hook.service",
+                "hooks": {
+                    "before_stop": [
+                        {"tasks": "hooks/example.yml", "on_error": "continue"}
+                    ]
+                },
             }
         ],
         groups,

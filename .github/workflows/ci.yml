@@ -47,20 +47,46 @@ jobs:
             ansible-playbook --syntax-check \
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook --syntax-check \
+              -i tests/lifecycle_inventory.ini \
+              tests/hook_failure.yml
       - name: Sequential systemd lifecycle integration
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee /tmp/serviceflow-integration.log) 2>&1
           trap 'bash tests/systemd_fixture.sh cleanup' EXIT
 
           bash tests/systemd_fixture.sh setup
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/hook_failure.yml; then
+            echo 'expected the failing hook playbook to fail' >&2
+            exit 1
+          fi
+          test "$(systemctl is-active serviceflow-alpha.service)" = active
+          test "$(systemctl is-active serviceflow-beta.service)" = active
+          test ! -s /tmp/serviceflow-order.log
+
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml \
               -e requested_action=restart
           diff -u \
-            <(printf 'stop-beta\nstop-alpha\nstart-alpha\nstart-beta\n') \
+            <(printf '%s\n' \
+              before-stop-beta \
+              stop-beta \
+              after-stop-beta \
+              before-stop-alpha \
+              stop-alpha \
+              after-stop-alpha \
+              before-start-alpha \
+              start-alpha \
+              before-start-beta \
+              start-beta) \
             /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
@@ -78,6 +104,33 @@ jobs:
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml \
               -e requested_action=start
-          diff -u \
-            <(printf 'start-alpha\nstart-beta\n') \
-            /tmp/serviceflow-order.log
+          printf '%s\n' \
+            before-start-alpha \
+            start-alpha \
+            before-start-beta \
+            start-beta \
+            > /tmp/serviceflow-expected.log
+          diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
+
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=start \
+              -e expect_hooks=false
+          diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
+
+          bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=stop \
+              -e expect_hooks=false
+          test ! -s /tmp/serviceflow-order.log
+      - name: Upload lifecycle diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-diagnostics
+          path: /tmp/serviceflow-integration.log

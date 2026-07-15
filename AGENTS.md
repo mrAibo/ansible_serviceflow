@@ -16,6 +16,7 @@ Project-specific constraints:
 - Resolve hosts from inventory data, not from the orchestrator host's `group_names`.
 - Hooks reference native Ansible task files. Do not embed or interpret arbitrary task dictionaries from variables.
 - Product-specific behavior belongs in consumer hook files, not collection core.
+- Do not commit real service names, hostnames, filesystem paths or product names. Use neutral examples in code, tests, documentation, issues and pull requests.
 - An old log line must never satisfy readiness for a new service start.
 - Validate the complete plan before changing the first service.
 - Check mode must not change services or wait for events that can only occur after a change.
