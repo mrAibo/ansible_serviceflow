@@ -1,8 +1,9 @@
 ---
-- name: Verify hook context target
+- name: Verify hook context
   ansible.builtin.assert:
     that:
-      - serviceflow_hook_context.target_host == inventory_hostname
+      - serviceflow_hook_context.target_host == serviceflow_target_host
+      - serviceflow_hook_context.service == serviceflow_current_service.name
       - serviceflow_hook_context.phase in ['before_start', 'before_stop', 'after_stop']
 
 - name: Record lifecycle hook marker
