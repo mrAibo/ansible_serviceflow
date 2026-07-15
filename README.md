@@ -2,7 +2,7 @@
 
 Dependency-aware systemd service lifecycle orchestration for Ansible.
 
-> **Status:** MVP development. The planner and lifecycle role validate service definitions, resolve inventory-group hosts, execute deterministic start, stop and restart phases, run transition-aware task-file hooks, and verify systemd readiness. New-log-entry readiness is not implemented yet.
+> **Status:** MVP development. The planner and lifecycle role validate service definitions, resolve inventory-group hosts, execute deterministic start, stop and restart phases, run transition-aware task-file hooks, and verify systemd or new-log-entry readiness.
 
 ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
 
@@ -20,11 +20,11 @@ serviceflow_services:
     groups: [backend]
     unit: example-backend.service
     ready:
-      type: systemd
-      active_state: active
-      sub_state: running
-      timeout: 60
-      interval: 2
+      type: log
+      path: /var/log/example/application.log
+      regex: '^Application ready$'
+      timeout: 120
+      interval: 1
     hooks:
       after_ready:
         - name: Verify dependent state
@@ -33,6 +33,10 @@ serviceflow_services:
   - name: worker
     groups: [worker]
     unit: example-worker.service
+    ready:
+      type: systemd
+      active_state: active
+      sub_state: running
 
   - name: api
     groups: [api]
@@ -78,8 +82,6 @@ Hooks run only when the requested systemd state requires a real transition. They
 
 ## Systemd readiness
 
-A service can require a systemd state before ServiceFlow advances to the next service:
-
 ```yaml
 ready:
   type: systemd
@@ -91,11 +93,30 @@ ready:
 
 `active_state` defaults to `active`. `sub_state` is optional. `timeout` and `interval` are positive integers in seconds and default to `60` and `2`.
 
-Readiness is verified after every normal start action, including an idempotent start of an already-active service. This detects a service whose systemd state does not match the declared boundary. Check mode reports the plan but neither waits for readiness nor runs `after_ready` hooks.
+Systemd readiness is verified after every normal start action, including an idempotent start of an already-active service. This detects a service whose systemd state does not match the declared boundary.
 
-A readiness failure stops the lifecycle before the next service is processed and reports the expected and last observed systemd states. Successful checks are returned in `serviceflow_result.readiness`.
+## New-log-entry readiness
 
-New-log-entry readiness remains deferred until file identity, byte-offset, truncation and rotation behavior are implemented and tested.
+```yaml
+ready:
+  type: log
+  path: /var/log/example/application.log
+  regex: '^Application ready$'
+  timeout: 60
+  interval: 1
+```
+
+Before a real start transition, ServiceFlow captures the log file device, inode and byte offset. After systemd starts the unit, only bytes written after that boundary can satisfy the regular expression. Existing matching lines are ignored.
+
+The log file may be absent when the boundary is captured. Copy-truncate and rename-based rotation are handled. ServiceFlow never removes or rewrites log content.
+
+Log readiness needs an actual start transition. When the service is already active, the check is recorded as skipped with reason `no_start_transition`; ServiceFlow does not wait indefinitely for a new startup message. Check mode captures no boundary, waits for no readiness event and runs no mutation hook.
+
+## Failure behavior and results
+
+A readiness failure stops the lifecycle before the next service is processed. A service that was successfully started before its readiness timeout remains started; automatic rollback is outside the current scope.
+
+Successful and skipped checks are returned in `serviceflow_result.readiness`. Log results include bytes examined, elapsed time, rotation and truncation counts, without returning log contents.
 
 ## MVP
 
