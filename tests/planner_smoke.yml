@@ -1,0 +1,44 @@
+---
+- name: Verify installed ServiceFlow planner
+  hosts: localhost
+  gather_facts: false
+  vars:
+    planner_groups:
+      modeshape:
+        - modeshape01
+      web:
+        - web01
+        - shared01
+      tobi:
+        - shared01
+        - tobi01
+    planner_services:
+      - name: modeshape
+        groups:
+          - modeshape
+        unit: xout-modeshape.service
+      - name: web
+        groups:
+          - web
+          - tobi
+        unit: xout-web.service
+  tasks:
+    - name: Build restart plan
+      ansible.builtin.set_fact:
+        planner_result: >-
+          {{
+            planner_services
+            | mraibo.serviceflow.serviceflow_plan(
+                planner_groups,
+                'restart'
+              )
+          }}
+
+    - name: Verify phases, order and host deduplication
+      ansible.builtin.assert:
+        that:
+          - planner_result.phases | map(attribute='action') | list == ['stop', 'start']
+          - planner_result.phases[0].services | map(attribute='name') | list == ['web', 'modeshape']
+          - planner_result.phases[1].services | map(attribute='name') | list == ['modeshape', 'web']
+          - planner_result.phases[1].services[1].hosts == ['web01', 'shared01', 'tobi01']
+          - planner_result.skipped == []
