@@ -51,6 +51,10 @@ jobs:
             ansible-playbook --syntax-check \
               -i tests/lifecycle_inventory.ini \
               tests/hook_failure.yml
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook --syntax-check \
+              -i tests/lifecycle_inventory.ini \
+              tests/readiness_failure.yml
       - name: Sequential systemd lifecycle integration
         shell: bash
         run: |
@@ -85,8 +89,10 @@ jobs:
               after-stop-alpha \
               before-start-alpha \
               start-alpha \
+              after-ready-alpha \
               before-start-beta \
-              start-beta) \
+              start-beta \
+              after-ready-beta) \
             /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
@@ -107,8 +113,10 @@ jobs:
           printf '%s\n' \
             before-start-alpha \
             start-alpha \
+            after-ready-alpha \
             before-start-beta \
             start-beta \
+            after-ready-beta \
             > /tmp/serviceflow-expected.log
           diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
 
@@ -128,6 +136,17 @@ jobs:
               -e requested_action=stop \
               -e expect_hooks=false
           test ! -s /tmp/serviceflow-order.log
+
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/readiness_failure.yml; then
+            echo 'expected the readiness failure playbook to fail' >&2
+            exit 1
+          fi
+          test "$(systemctl is-active serviceflow-alpha.service)" = active
+          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
+          diff -u <(printf 'start-alpha\n') /tmp/serviceflow-order.log
       - name: Upload lifecycle diagnostics
         if: failure()
         uses: actions/upload-artifact@v4

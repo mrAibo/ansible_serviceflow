@@ -16,6 +16,7 @@
       skipped: "{{ serviceflow_plan_result.skipped }}"
       processed: []
       hooks: []
+      readiness: []
 
 - name: Show lifecycle plan in check mode
   ansible.builtin.debug:

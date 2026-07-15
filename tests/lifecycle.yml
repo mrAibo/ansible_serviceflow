@@ -10,12 +10,23 @@
         groups:
           - alpha
         unit: serviceflow-alpha.service
+        ready:
+          type: systemd
+          active_state: active
+          sub_state: exited
+          timeout: 5
+          interval: 1
         hooks:
           before_start:
             - name: Record alpha before start
               tasks: hooks/record.yml
               vars:
                 hook_marker: before-start-alpha
+          after_ready:
+            - name: Record alpha after readiness
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: after-ready-alpha
           before_stop:
             - name: Record alpha before stop
               tasks: hooks/record.yml
@@ -30,12 +41,23 @@
         groups:
           - beta
         unit: serviceflow-beta.service
+        ready:
+          type: systemd
+          active_state: active
+          sub_state: exited
+          timeout: 5
+          interval: 1
         hooks:
           before_start:
             - name: Record beta before start
               tasks: hooks/record.yml
               vars:
                 hook_marker: before-start-beta
+          after_ready:
+            - name: Record beta after readiness
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: after-ready-beta
           before_stop:
             - name: Record beta before stop
               tasks: hooks/record.yml
@@ -85,7 +107,9 @@
     expected_hook_phases:
       start:
         - before_start
+        - after_ready
         - before_start
+        - after_ready
       stop:
         - before_stop
         - after_stop
@@ -97,10 +121,14 @@
         - before_stop
         - after_stop
         - before_start
+        - after_ready
         - before_start
+        - after_ready
     expected_hook_services:
       start:
         - alpha
+        - alpha
+        - beta
         - beta
       stop:
         - beta
@@ -113,6 +141,8 @@
         - alpha
         - alpha
         - alpha
+        - alpha
+        - beta
         - beta
     effective_hook_phases: >-
       {{
@@ -125,6 +155,12 @@
         []
         if ansible_check_mode or not hooks_expected
         else expected_hook_services[serviceflow_action]
+      }}
+    effective_readiness_services: >-
+      {{
+        []
+        if ansible_check_mode or serviceflow_action == 'stop'
+        else ['alpha', 'beta']
       }}
   roles:
     - role: mraibo.serviceflow.lifecycle
@@ -139,4 +175,7 @@
           - serviceflow_result.processed | map(attribute='host') | list == expected_hosts[serviceflow_action]
           - serviceflow_result.hooks | map(attribute='phase') | list == effective_hook_phases
           - serviceflow_result.hooks | map(attribute='service') | list == effective_hook_services
+          - serviceflow_result.readiness | map(attribute='service') | list == effective_readiness_services
+          - serviceflow_result.readiness | map(attribute='active_state') | unique | list in [[], ['active']]
+          - serviceflow_result.readiness | map(attribute='sub_state') | unique | list in [[], ['exited']]
           - serviceflow_result.skipped == []

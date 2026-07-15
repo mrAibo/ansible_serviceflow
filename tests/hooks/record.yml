@@ -4,7 +4,7 @@
     that:
       - serviceflow_hook_context.target_host == serviceflow_target_host
       - serviceflow_hook_context.service == serviceflow_current_service.name
-      - serviceflow_hook_context.phase in ['before_start', 'before_stop', 'after_stop']
+      - serviceflow_hook_context.phase in ['before_start', 'before_stop', 'after_ready', 'after_stop']
 
 - name: Record lifecycle hook marker
   ansible.builtin.command:

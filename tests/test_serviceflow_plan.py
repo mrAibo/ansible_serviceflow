@@ -36,6 +36,13 @@ def main():
             "name": "backend",
             "groups": ["backend"],
             "unit": "example-backend.service",
+            "ready": {
+                "type": "systemd",
+                "active_state": "active",
+                "sub_state": "exited",
+                "timeout": 10,
+                "interval": 2,
+            },
             "hooks": {
                 "before_stop": [
                     {
@@ -43,7 +50,13 @@ def main():
                         "tasks": "hooks/prepare_shutdown.yml",
                         "vars": {"timeout": 60},
                     }
-                ]
+                ],
+                "after_ready": [
+                    {
+                        "name": "Record readiness",
+                        "tasks": "hooks/record_ready.yml",
+                    }
+                ],
             },
         },
         {
@@ -64,8 +77,24 @@ def main():
                 "tasks": "hooks/prepare_shutdown.yml",
                 "vars": {"timeout": 60},
             }
-        ]
+        ],
+        "after_ready": [
+            {
+                "name": "Record readiness",
+                "tasks": "hooks/record_ready.yml",
+                "vars": {},
+            }
+        ],
     }
+    assert start["phases"][0]["services"][0]["ready"] == {
+        "type": "systemd",
+        "active_state": "active",
+        "sub_state": "exited",
+        "timeout": 10,
+        "interval": 2,
+        "attempts": 6,
+    }
+    assert start["phases"][0]["services"][1]["ready"] is None
 
     stop = MODULE.serviceflow_plan(services, groups, "stop")
     assert service_names(stop) == ["frontend", "backend"]
@@ -127,26 +156,52 @@ def main():
         "start",
     )
     expect_error(
-        "unsupported fields: ready",
+        "ready.type must be 'systemd'",
         [
             {
-                "name": "unsafe",
+                "name": "bad-type",
                 "groups": ["frontend"],
-                "unit": "unsafe.service",
-                "ready": {"type": "systemd"},
+                "unit": "bad-type.service",
+                "ready": {"type": "log"},
             }
         ],
         groups,
         "start",
     )
     expect_error(
-        "unsupported phases: after_ready",
+        "ready.timeout must be a positive integer",
         [
             {
-                "name": "bad-phase",
+                "name": "bad-timeout",
                 "groups": ["frontend"],
-                "unit": "bad-phase.service",
-                "hooks": {"after_ready": []},
+                "unit": "bad-timeout.service",
+                "ready": {"type": "systemd", "timeout": 0},
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "ready contains unsupported fields: regex",
+        [
+            {
+                "name": "bad-field",
+                "groups": ["frontend"],
+                "unit": "bad-field.service",
+                "ready": {"type": "systemd", "regex": "ready"},
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "hooks.after_ready requires ready",
+        [
+            {
+                "name": "missing-ready",
+                "groups": ["frontend"],
+                "unit": "missing-ready.service",
+                "hooks": {"after_ready": [{"tasks": "hooks/example.yml"}]},
             }
         ],
         groups,
