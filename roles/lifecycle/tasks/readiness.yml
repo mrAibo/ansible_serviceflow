@@ -1,0 +1,86 @@
+---
+- name: Wait for {{ serviceflow_current_service.unit }} readiness on {{ serviceflow_target_host }}
+  block:
+    - name: Read systemd readiness state
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - show
+          - --property=ActiveState
+          - --property=SubState
+          - --no-pager
+          - "{{ serviceflow_current_service.unit }}"
+      delegate_to: "{{ serviceflow_target_host }}"
+      become: "{{ serviceflow_become }}"
+      check_mode: false
+      changed_when: false
+      register: serviceflow_readiness_result
+      until:
+        - >-
+          (
+            'ActiveState=' ~ serviceflow_current_service.ready.active_state
+          ) in serviceflow_readiness_result.stdout_lines
+        - >-
+          serviceflow_current_service.ready.sub_state is none
+          or
+          (
+            'SubState=' ~ serviceflow_current_service.ready.sub_state
+          ) in serviceflow_readiness_result.stdout_lines
+      retries: "{{ serviceflow_current_service.ready.attempts }}"
+      delay: "{{ serviceflow_current_service.ready.interval }}"
+  rescue:
+    - name: Report systemd readiness failure
+      ansible.builtin.fail:
+        msg: >-
+          ServiceFlow readiness failed for
+          {{ serviceflow_current_service.unit }} on
+          {{ serviceflow_target_host }}. Expected ActiveState={{
+          serviceflow_current_service.ready.active_state }}{{
+          ', SubState=' ~ serviceflow_current_service.ready.sub_state
+          if serviceflow_current_service.ready.sub_state is not none
+          else '' }} within {{ serviceflow_current_service.ready.timeout }}
+          seconds. Last systemd state: {{
+          serviceflow_readiness_result.stdout_lines | default([]) | join(', ')
+          }}.
+
+- name: Store systemd readiness state
+  ansible.builtin.set_fact:
+    serviceflow_readiness_active_state: >-
+      {{
+        (
+          serviceflow_readiness_result.stdout_lines
+          | select('match', '^ActiveState=')
+          | first
+        ).split('=', 1)[1]
+      }}
+    serviceflow_readiness_sub_state: >-
+      {{
+        (
+          serviceflow_readiness_result.stdout_lines
+          | select('match', '^SubState=')
+          | first
+        ).split('=', 1)[1]
+      }}
+
+- name: Record systemd readiness result
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'readiness': serviceflow_result.readiness
+              + [
+                  {
+                    'type': 'systemd',
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host,
+                    'active_state': serviceflow_readiness_active_state,
+                    'sub_state': serviceflow_readiness_sub_state,
+                    'attempts': serviceflow_readiness_result.attempts | default(1)
+                  }
+                ]
+            }
+          )
+      }}
