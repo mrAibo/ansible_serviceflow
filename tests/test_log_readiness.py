@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+
+import importlib.util
+import os
+from pathlib import Path
+import tempfile
+import threading
+import time
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = ROOT / "plugins" / "modules" / "log_readiness.py"
+SPEC = importlib.util.spec_from_file_location("log_readiness", MODULE_PATH)
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+def later(callback, delay=0.05):
+    thread = threading.Thread(target=lambda: (time.sleep(delay), callback()))
+    thread.start()
+    return thread
+
+
+def main():
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "application.log"
+
+        path.write_text("Application ready\n", encoding="utf-8")
+        boundary = MODULE.capture_boundary(path)
+        thread = later(
+            lambda: path.open("a", encoding="utf-8").write("Application ready\n")
+        )
+        result = MODULE.wait_for_match(
+            str(path),
+            "Application ready",
+            boundary,
+            1,
+            0.01,
+        )
+        thread.join()
+        assert result["matched"]
+        assert result["bytes_read"] > 0
+        assert result["rotations"] == 0
+        assert result["truncations"] == 0
+
+        path.write_text("old data\n", encoding="utf-8")
+        boundary = MODULE.capture_boundary(path)
+
+        def truncate():
+            path.write_text("Application ready\n", encoding="utf-8")
+
+        thread = later(truncate)
+        result = MODULE.wait_for_match(
+            str(path),
+            "Application ready",
+            boundary,
+            1,
+            0.01,
+        )
+        thread.join()
+        assert result["matched"]
+        assert result["truncations"] == 1
+
+        path.write_text("old data\n", encoding="utf-8")
+        boundary = MODULE.capture_boundary(path)
+        rotated = Path(directory) / "application.log.1"
+
+        def rotate():
+            os.rename(path, rotated)
+            path.write_text("Application ready\n", encoding="utf-8")
+
+        thread = later(rotate)
+        result = MODULE.wait_for_match(
+            str(path),
+            "Application ready",
+            boundary,
+            1,
+            0.01,
+        )
+        thread.join()
+        assert result["matched"]
+        assert result["rotations"] == 1
+
+        path.unlink()
+        boundary = MODULE.capture_boundary(path)
+        assert not boundary["exists"]
+        thread = later(lambda: path.write_text("Application ready\n", encoding="utf-8"))
+        result = MODULE.wait_for_match(
+            str(path),
+            "Application ready",
+            boundary,
+            1,
+            0.01,
+        )
+        thread.join()
+        assert result["matched"]
+        assert result["path_exists"]
+
+        path.write_text("Application ready\n", encoding="utf-8")
+        boundary = MODULE.capture_boundary(path)
+        try:
+            MODULE.wait_for_match(
+                str(path),
+                "Application ready",
+                boundary,
+                0.05,
+                0.01,
+            )
+        except MODULE.LogReadinessTimeout as error:
+            assert not error.result["matched"]
+            assert error.result["bytes_read"] == 0
+        else:
+            raise AssertionError("old matching data satisfied readiness")
+
+    print("Log readiness tests passed")
+
+
+if __name__ == "__main__":
+    main()
