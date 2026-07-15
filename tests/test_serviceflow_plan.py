@@ -92,7 +92,7 @@ def main():
         "sub_state": "exited",
         "timeout": 10,
         "interval": 2,
-        "attempts": 5,
+        "attempts": 6,
     }
     assert start["phases"][0]["services"][1]["ready"] is None
 
