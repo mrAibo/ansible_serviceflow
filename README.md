@@ -2,7 +2,7 @@
 
 Dependency-aware systemd service lifecycle orchestration for Ansible.
 
-> **Status:** MVP development. The planner and lifecycle role validate service definitions, resolve inventory-group hosts, execute deterministic start, stop and restart phases, run transition-aware task-file hooks, and verify systemd or new-log-entry readiness.
+> **Status:** The version 0.1.0 MVP is functionally implemented and undergoing external acceptance before its first release.
 
 ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
 
@@ -51,6 +51,17 @@ serviceflow_services:
   - name: frontend
     groups: [frontend, edge]
     unit: example-frontend.service
+```
+
+Use the collection role from an orchestration play:
+
+```yaml
+---
+- name: Manage the application lifecycle
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: mraibo.serviceflow.lifecycle
 ```
 
 The declared order is the start order. Stop uses the exact reverse order. Restart performs a complete stop followed by a complete start.
@@ -120,9 +131,9 @@ A readiness failure stops the lifecycle before the next service is processed. A 
 
 Successful and skipped checks are returned in `serviceflow_result.readiness`. Log results include bytes examined, elapsed time, rotation and truncation counts, without returning log contents.
 
-## MVP
+## MVP scope
 
-The first release is limited to:
+Version 0.1.0 includes:
 
 - ordered start and reverse-order stop;
 - restart as full stop plus full start;
@@ -135,8 +146,13 @@ The first release is limited to:
 
 Arbitrary dependency graphs, parallel execution, rolling restarts, containers and platform-specific application integrations are intentionally deferred.
 
-See [the MVP design](docs/DESIGN.md) and [issue #1](https://github.com/mrAibo/ansible_serviceflow/issues/1).
+## Documentation
+
+- [MVP design](docs/DESIGN.md)
+- [Acceptance guide](docs/ACCEPTANCE.md)
+- [Changelog](CHANGELOG.md)
+- [MVP tracker](https://github.com/mrAibo/ansible_serviceflow/issues/1)
 
 ## License
 
-GPL-3.0-or-later.
+GPL-3.0-or-later. See [LICENSE](LICENSE).
