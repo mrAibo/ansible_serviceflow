@@ -182,7 +182,7 @@ def _readiness(value, field):
         "sub_state": sub_state,
         "timeout": timeout,
         "interval": interval,
-        "attempts": max(1, (timeout + interval - 1) // interval),
+        "attempts": max(1, (timeout + interval - 1) // interval + 1),
     }
 
 
