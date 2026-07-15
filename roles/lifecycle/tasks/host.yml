@@ -49,6 +49,23 @@
   become: "{{ serviceflow_become }}"
   register: serviceflow_systemd_result
 
+- name: Verify systemd readiness after start
+  ansible.builtin.include_tasks: readiness.yml
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - not ansible_check_mode
+
+- name: Run hooks after readiness
+  ansible.builtin.include_tasks: hooks.yml
+  vars:
+    serviceflow_hook_phase: after_ready
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
 - name: Run hooks after the stop transition
   ansible.builtin.include_tasks: hooks.yml
   vars:
@@ -77,8 +94,16 @@
                     'initial_state': serviceflow_initial_state,
                     'check_mode': ansible_check_mode | bool,
                     'active_state': (
-                      serviceflow_systemd_result.status | default({})
-                    ).get('ActiveState', 'unknown')
+                      serviceflow_readiness_active_state
+                      if
+                        serviceflow_phase.action == 'start'
+                        and serviceflow_current_service.ready is not none
+                        and not ansible_check_mode
+                      else
+                        (
+                          serviceflow_systemd_result.status | default({})
+                        ).get('ActiveState', 'unknown')
+                    )
                   }
                 ]
             }
