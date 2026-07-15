@@ -1,0 +1,28 @@
+name: Align module license header
+
+on:
+  push:
+    branches:
+      - chore/mvp-release-audit
+
+permissions:
+  contents: write
+
+jobs:
+  update-header:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/mvp-release-audit
+      - name: Reference the packaged license and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/see COPYING or/see LICENSE or/' plugins/modules/log_readiness.py
+          git rm .github/workflows/fix-license-header.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add plugins/modules/log_readiness.py
+          git commit -m "Reference the packaged license file"
+          git push origin HEAD:chore/mvp-release-audit
