@@ -22,12 +22,13 @@ For every managed service in declared order and for every resolved host:
 
 1. read the current systemd active state without modifying the unit;
 2. run `before_start` hooks only when a start transition is required;
-3. request `state: started` through `ansible.builtin.systemd_service`;
-4. verify configured systemd readiness when present;
-5. run `after_ready` hooks only after readiness succeeds for a real start transition;
-6. record the initial state, predicted or actual change, final state and readiness result.
+3. capture a log boundary when log readiness and a real start transition are configured;
+4. request `state: started` through `ansible.builtin.systemd_service`;
+5. verify configured readiness;
+6. run `after_ready` hooks only after readiness succeeds for a real start transition;
+7. record the operation and readiness result.
 
-Systemd readiness is verified for every normal start action, including an already-active service. This makes `start` both idempotent and health-verifying when `ready` is configured. Mutation hooks remain transition-aware and do not rerun for an already satisfied state.
+Systemd readiness is verified for every normal start action, including an already-active service. Log readiness requires a new start boundary and is recorded as skipped when no start transition occurs. Mutation hooks remain transition-aware.
 
 ### Stop
 
@@ -45,43 +46,13 @@ Restart is not a per-service `systemctl restart` loop. It is the full stop actio
 
 ## Hooks
 
-Hooks reference normal Ansible task files supplied by the consuming project:
+Implemented phases are `before_start`, `before_stop`, `after_ready` and `after_stop`. Hook task files are supplied by the consuming project and retain native Ansible behavior. Relative paths are resolved from the consuming playbook directory.
 
-```yaml
-hooks:
-  before_stop:
-    - name: Prepare application shutdown
-      tasks: hooks/prepare_shutdown.yml
-      vars:
-        shutdown_timeout: 60
-```
+Hook values are namespaced under `serviceflow_hook_vars`. Lifecycle context is available under `serviceflow_hook_context` with `action`, `phase`, `service`, `unit` and `target_host`.
 
-The implemented phases are:
+Hooks run only for a required transition and never in check mode. `after_ready` requires a readiness definition and runs only after successful readiness following a real start transition.
 
-- `before_start`
-- `before_stop`
-- `after_ready`
-- `after_stop`
-
-`after_ready` requires a readiness definition. It runs only after a successful readiness check following a real start transition.
-
-Relative task paths are resolved from the consuming playbook directory. Absolute paths are accepted. Included hook tasks execute on the current service target host by default and retain native Ansible behavior such as loops, registers, assertions and explicit task-level delegation.
-
-Hook-supplied values are namespaced under `serviceflow_hook_vars`. ServiceFlow exposes a separate `serviceflow_hook_context` mapping with:
-
-- `action`
-- `phase`
-- `service`
-- `unit`
-- `target_host`
-
-ServiceFlow does not parse task dictionaries embedded in variables. Hook task files are normal Ansible files and failures stop the lifecycle naturally.
-
-Hooks run only for a required transition. They do not run for an already satisfied state or in check mode.
-
-## Readiness
-
-The implemented readiness type is `systemd`:
+## Systemd readiness
 
 ```yaml
 ready:
@@ -92,39 +63,42 @@ ready:
   interval: 2
 ```
 
-`active_state` defaults to `active`. `sub_state` is optional. `timeout` and `interval` are positive integer seconds and default to `60` and `2`.
+`active_state` defaults to `active`; `sub_state` is optional. The role performs one immediate `systemctl show` read plus bounded retries. Successful results include observed states and attempt count.
 
-The planner converts the time boundary into a bounded number of attempts: one immediate state read plus enough delayed attempts to reach or slightly exceed the configured timeout. Each attempt reads `ActiveState` and `SubState` through `systemctl show` without changing the unit.
+## Log readiness
 
-A failed readiness check stops the lifecycle before the next service is processed. The failure message includes the expected states and the last observed systemd state. A successfully started service is not automatically stopped after readiness failure; rollback remains outside the current scope.
+```yaml
+ready:
+  type: log
+  path: /var/log/example/application.log
+  regex: '^Application ready$'
+  timeout: 60
+  interval: 1
+```
 
-Successful checks are stored in `serviceflow_result.readiness` with service, unit, host, observed states and attempt count.
+The boundary is captured after `before_start` hooks and immediately before systemd starts the unit. It contains whether the path exists, its device, inode and current byte offset. The wait phase examines only bytes written after that boundary.
 
-The remaining MVP readiness type is `log`: a regular expression must occur in data written after the current start boundary. Log readiness must record file identity and byte offset before starting the service. Existing matching lines cannot satisfy the check. Rotation and truncation behavior must be covered by tests before the feature is accepted.
+The implementation handles:
 
-Port and HTTP checks are useful follow-up features, but standard Ansible modules already cover them and they are not required to prove the orchestration model.
+- a file created after capture;
+- normal append;
+- same-inode truncation by resetting the tracked offset;
+- rename-based rotation by locating the previous inode in the same directory and then following the new path identity.
+
+Existing matching content cannot satisfy readiness. Log contents are never modified and are not returned in results. Only counters and file identity metadata are reported.
+
+When no start transition occurs, log readiness is recorded as skipped with reason `no_start_transition`. Waiting for a new startup message from an already-running service would otherwise be unbounded and misleading.
 
 ## Validation and check mode
 
-The complete configuration and execution plan must be validated before the first service transition. Current validation includes actions, unique service names, unit names, group existence, non-empty resolved hosts, supported hook phases, hook task paths, hook variable mappings and systemd readiness fields.
+The complete configuration is validated before the first transition. Readiness fields are type-specific. Log paths must be absolute, regular expressions must compile, and timeout and interval values must be positive integers.
 
-Unknown service, hook and readiness fields fail before a service is changed. `after_ready` without `ready` also fails during planning.
-
-Check mode reports the ordered plan and uses native `systemd_service` change prediction. It does not change a service, run mutation hooks or wait for readiness events that depend on a future start.
+Check mode reports the plan and uses native systemd change prediction. It captures no log boundary, waits for no readiness event and runs no mutation hook.
 
 ## Failure behavior
 
-The implementation stops at the first service, hook or readiness failure. A failing `before_stop` hook prevents the unit stop. A readiness failure prevents later services and `after_ready` hooks; errors are not suppressed.
-
-Automatic rollback is deferred until the project can reliably distinguish services changed by the current run from services that were already active.
+The implementation stops at the first service, hook or readiness failure. A readiness failure prevents later services and `after_ready` hooks. A service already started before a timeout remains started; rollback is outside the current scope.
 
 ## Non-goals
 
-The MVP does not provide:
-
-- arbitrary dependency graphs;
-- parallel, rolling or batched execution;
-- automatic dependency discovery;
-- application-specific integrations;
-- container, Kubernetes or Windows service management;
-- external Python dependencies.
+The MVP does not provide arbitrary dependency graphs, parallel or rolling execution, automatic dependency discovery, application-specific integrations, container or Windows service management, external Python dependencies, or implicit error suppression.

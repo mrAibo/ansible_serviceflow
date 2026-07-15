@@ -1,0 +1,23 @@
+---
+- name: Verify old log matches do not satisfy readiness
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: start
+    serviceflow_services:
+      - name: alpha
+        groups:
+          - alpha
+        unit: serviceflow-alpha.service
+        ready:
+          type: log
+          path: /tmp/serviceflow-alpha.log
+          regex: '^Application ready$'
+          timeout: 1
+          interval: 1
+      - name: beta
+        groups:
+          - beta
+        unit: serviceflow-beta.service
+  roles:
+    - role: mraibo.serviceflow.lifecycle

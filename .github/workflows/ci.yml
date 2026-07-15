@@ -26,6 +26,12 @@ jobs:
             plugins/filter/serviceflow_plan.py \
             tests/test_serviceflow_plan.py
           python tests/test_serviceflow_plan.py
+      - name: Log readiness tests
+        run: |
+          python -m py_compile \
+            plugins/modules/log_readiness.py \
+            tests/test_log_readiness.py
+          python tests/test_log_readiness.py
       - name: Build and install collection
         shell: bash
         run: |
@@ -37,25 +43,26 @@ jobs:
           ansible-galaxy collection install "$archive" -p collections
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-galaxy collection list mraibo.serviceflow
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-doc -t module mraibo.serviceflow.log_readiness >/dev/null
       - name: Installed collection planner smoke test
         run: |
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook -i localhost, -c local tests/planner_smoke.yml
       - name: Lifecycle role syntax
         run: |
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook --syntax-check \
-              -i tests/lifecycle_inventory.ini \
-              tests/lifecycle.yml
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook --syntax-check \
-              -i tests/lifecycle_inventory.ini \
-              tests/hook_failure.yml
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook --syntax-check \
-              -i tests/lifecycle_inventory.ini \
-              tests/readiness_failure.yml
-      - name: Sequential systemd lifecycle integration
+          for playbook in \
+            tests/lifecycle.yml \
+            tests/hook_failure.yml \
+            tests/readiness_failure.yml \
+            tests/log_lifecycle.yml \
+            tests/log_readiness_failure.yml; do
+            ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+              ansible-playbook --syntax-check \
+                -i tests/lifecycle_inventory.ini \
+                "$playbook"
+          done
+      - name: Sequential lifecycle integration
         shell: bash
         run: |
           set -euo pipefail
@@ -141,7 +148,48 @@ jobs:
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
               tests/readiness_failure.yml; then
-            echo 'expected the readiness failure playbook to fail' >&2
+            echo 'expected the systemd readiness playbook to fail' >&2
+            exit 1
+          fi
+          test "$(systemctl is-active serviceflow-alpha.service)" = active
+          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
+          diff -u <(printf 'start-alpha\n') /tmp/serviceflow-order.log
+
+          bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook --check \
+              -i tests/lifecycle_inventory.ini \
+              tests/log_lifecycle.yml
+          test "$(systemctl is-active serviceflow-alpha.service || true)" = inactive
+          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
+          test ! -s /tmp/serviceflow-order.log
+
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/log_lifecycle.yml
+          printf '%s\n' \
+            before-start-log-alpha \
+            start-alpha \
+            after-ready-log-alpha \
+            start-beta \
+            > /tmp/serviceflow-log-expected.log
+          diff -u /tmp/serviceflow-log-expected.log /tmp/serviceflow-order.log
+
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/log_lifecycle.yml \
+              -e expect_transition=false
+          diff -u /tmp/serviceflow-log-expected.log /tmp/serviceflow-order.log
+
+          bash tests/systemd_fixture.sh reset
+          bash tests/systemd_fixture.sh suppress-readiness
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/log_readiness_failure.yml; then
+            echo 'expected old-only log readiness to fail' >&2
             exit 1
           fi
           test "$(systemctl is-active serviceflow-alpha.service)" = active

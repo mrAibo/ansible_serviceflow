@@ -41,6 +41,20 @@
     - serviceflow_transition_needed | bool
     - not ansible_check_mode
 
+- name: Capture log readiness boundary before start
+  mraibo.serviceflow.log_readiness:
+    action: capture
+    path: "{{ serviceflow_current_service.ready.path }}"
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  register: serviceflow_log_boundary_result
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'log'
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
 - name: "{{ serviceflow_phase.action | capitalize }} {{ serviceflow_current_service.unit }} on {{ serviceflow_target_host }}"
   ansible.builtin.systemd_service:
     name: "{{ serviceflow_current_service.unit }}"
@@ -54,6 +68,15 @@
   when:
     - serviceflow_phase.action == 'start'
     - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'systemd'
+    - not ansible_check_mode
+
+- name: Verify log readiness after start
+  ansible.builtin.include_tasks: log_readiness.yml
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'log'
     - not ansible_check_mode
 
 - name: Run hooks after readiness
@@ -98,6 +121,7 @@
                       if
                         serviceflow_phase.action == 'start'
                         and serviceflow_current_service.ready is not none
+                        and serviceflow_current_service.ready.type == 'systemd'
                         and not ansible_check_mode
                       else
                         (

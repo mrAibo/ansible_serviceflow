@@ -1,6 +1,8 @@
 # Copyright: (c) 2026 Aleksej Voronin
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
+import os
+import re
 from collections.abc import Mapping, Sequence
 
 from ansible.errors import AnsibleFilterError
@@ -17,9 +19,12 @@ _ALLOWED_HOOK_PHASES = (
     "after_stop",
 )
 _ALLOWED_HOOK_FIELDS = frozenset({"name", "tasks", "vars"})
-_ALLOWED_READINESS_FIELDS = frozenset(
-    {"type", "active_state", "sub_state", "timeout", "interval"}
-)
+_COMMON_READINESS_FIELDS = frozenset({"type", "timeout", "interval"})
+_SYSTEMD_READINESS_FIELDS = _COMMON_READINESS_FIELDS | {
+    "active_state",
+    "sub_state",
+}
+_LOG_READINESS_FIELDS = _COMMON_READINESS_FIELDS | {"path", "regex"}
 
 
 def _fail(message):
@@ -146,24 +151,14 @@ def _hooks(value, field):
     return normalized
 
 
-def _readiness(value, field):
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        _fail(f"{field} must be a mapping")
+def _unsupported_readiness_fields(value, allowed, field):
+    unsupported = sorted(str(key) for key in value if key not in allowed)
+    if unsupported:
+        _fail(f"{field} contains unsupported fields: {', '.join(unsupported)}")
 
-    unsupported_fields = sorted(
-        str(key) for key in value if key not in _ALLOWED_READINESS_FIELDS
-    )
-    if unsupported_fields:
-        _fail(
-            f"{field} contains unsupported fields: "
-            + ", ".join(unsupported_fields)
-        )
 
-    readiness_type = _text(value.get("type"), f"{field}.type")
-    if readiness_type != "systemd":
-        _fail(f"{field}.type must be 'systemd'")
+def _systemd_readiness(value, field, timeout, interval):
+    _unsupported_readiness_fields(value, _SYSTEMD_READINESS_FIELDS, field)
 
     active_state = _text(
         value.get("active_state", "active"),
@@ -173,17 +168,58 @@ def _readiness(value, field):
     if sub_state is not None:
         sub_state = _text(sub_state, f"{field}.sub_state")
 
-    timeout = _positive_integer(value.get("timeout", 60), f"{field}.timeout")
-    interval = _positive_integer(value.get("interval", 2), f"{field}.interval")
-
     return {
-        "type": readiness_type,
+        "type": "systemd",
         "active_state": active_state,
         "sub_state": sub_state,
         "timeout": timeout,
         "interval": interval,
         "attempts": max(1, (timeout + interval - 1) // interval + 1),
     }
+
+
+def _log_readiness(value, field, timeout, interval):
+    _unsupported_readiness_fields(value, _LOG_READINESS_FIELDS, field)
+
+    path = _text(value.get("path"), f"{field}.path")
+    if not os.path.isabs(path):
+        _fail(f"{field}.path must be absolute")
+
+    regex = _text(value.get("regex"), f"{field}.regex")
+    try:
+        re.compile(regex, re.MULTILINE)
+    except re.error as error:
+        _fail(f"{field}.regex is invalid: {error}")
+
+    return {
+        "type": "log",
+        "path": path,
+        "regex": regex,
+        "timeout": timeout,
+        "interval": interval,
+    }
+
+
+def _readiness(value, field):
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        _fail(f"{field} must be a mapping")
+
+    readiness_type = _text(value.get("type"), f"{field}.type")
+    if readiness_type not in ("systemd", "log"):
+        _fail(f"{field}.type must be one of: systemd, log")
+
+    timeout = _positive_integer(value.get("timeout", 60), f"{field}.timeout")
+    default_interval = 2 if readiness_type == "systemd" else 1
+    interval = _positive_integer(
+        value.get("interval", default_interval),
+        f"{field}.interval",
+    )
+
+    if readiness_type == "systemd":
+        return _systemd_readiness(value, field, timeout, interval)
+    return _log_readiness(value, field, timeout, interval)
 
 
 def _phase(action, services):
