@@ -2,7 +2,7 @@
 
 Dependency-aware systemd service lifecycle orchestration for Ansible.
 
-> **Status:** MVP development. The planner now validates actions and service entries, resolves and deduplicates inventory-group hosts, and builds deterministic start, stop and restart phases. Service execution, hooks and readiness are not implemented yet.
+> **Status:** MVP development. The planner and lifecycle role now validate service definitions, resolve inventory-group hosts, and execute deterministic start, stop and restart phases with native systemd check mode and structured results. Hooks and readiness are not implemented yet.
 
 ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
 
