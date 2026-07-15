@@ -20,14 +20,17 @@ jobs:
           python-version: "3.12"
       - name: Install ansible-core
         run: python -m pip install --disable-pip-version-check -q ansible-core
-      - name: Planner and log readiness tests
+      - name: Planner tests
         run: |
           python -m py_compile \
             plugins/filter/serviceflow_plan.py \
-            plugins/modules/log_readiness.py \
-            tests/test_serviceflow_plan.py \
-            tests/test_log_readiness.py
+            tests/test_serviceflow_plan.py
           python tests/test_serviceflow_plan.py
+      - name: Log readiness tests
+        run: |
+          python -m py_compile \
+            plugins/modules/log_readiness.py \
+            tests/test_log_readiness.py
           python tests/test_log_readiness.py
       - name: Build and install collection
         shell: bash
