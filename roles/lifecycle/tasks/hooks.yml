@@ -1,0 +1,10 @@
+---
+- name: Process {{ serviceflow_hook_phase }} hooks
+  ansible.builtin.include_tasks: hook.yml
+  loop: >-
+    {{
+      serviceflow_current_service.hooks.get(serviceflow_hook_phase, [])
+    }}
+  loop_control:
+    loop_var: serviceflow_current_hook
+    label: "{{ serviceflow_current_hook.name }}"
