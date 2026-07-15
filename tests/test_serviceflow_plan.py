@@ -108,6 +108,20 @@ def main():
         groups,
         "start",
     )
+    expect_error(
+        "unsupported fields: hooks, ready",
+        [
+            {
+                "name": "unsafe",
+                "groups": ["web"],
+                "unit": "unsafe.service",
+                "hooks": {},
+                "ready": {"type": "systemd"},
+            }
+        ],
+        groups,
+        "start",
+    )
 
     registered = MODULE.FilterModule().filters()
     assert registered["serviceflow_plan"] is MODULE.serviceflow_plan
