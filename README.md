@@ -16,29 +16,29 @@ ServiceFlow will keep the application definition declarative:
 serviceflow_action: restart
 
 serviceflow_services:
-  - name: modeshape
-    groups: [modeshape]
-    unit: xout-modeshape.service
+  - name: backend
+    groups: [backend]
+    unit: example-backend.service
     ready:
       type: log
-      path: /var/log/xout/modeshape/server.log
-      regex: 'Started ModeShapeServer in'
+      path: /var/log/example/backend.log
+      regex: 'Application ready'
       timeout: 300
 
-  - name: activemq
-    groups: [activemq]
-    unit: xout-activemq-artemis.service
+  - name: worker
+    groups: [worker]
+    unit: example-worker.service
 
-  - name: portal
-    groups: [portal]
-    unit: xout-portal.service
+  - name: api
+    groups: [api]
+    unit: example-api.service
     hooks:
       before_stop:
-        - tasks: hooks/portal_stop_modules.yml
+        - tasks: hooks/prepare_shutdown.yml
 
-  - name: web
-    groups: [web, tobi]
-    unit: xout-web.service
+  - name: frontend
+    groups: [frontend, edge]
+    unit: example-frontend.service
 ```
 
 The `ready` and `hooks` fields above show the target MVP interface. Until their implementation lands, the planner rejects them instead of silently changing services without the requested safeguards.
