@@ -1,0 +1,4 @@
+---
+- name: Fail the lifecycle hook deliberately
+  ansible.builtin.fail:
+    msg: Intentional ServiceFlow hook failure
