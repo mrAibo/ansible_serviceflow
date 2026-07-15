@@ -1,0 +1,10 @@
+---
+- name: Record lifecycle hook marker
+  ansible.builtin.command:
+    argv:
+      - tee
+      - -a
+      - /tmp/serviceflow-order.log
+    stdin: "{{ hook_marker }}"
+    stdin_add_newline: true
+  changed_when: true
