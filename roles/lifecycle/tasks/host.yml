@@ -1,4 +1,46 @@
 ---
+- name: Read current state of {{ serviceflow_current_service.unit }} on {{ serviceflow_target_host }}
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ serviceflow_current_service.unit }}"
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  check_mode: false
+  changed_when: false
+  failed_when: serviceflow_state_result.rc not in [0, 3]
+  register: serviceflow_state_result
+
+- name: Determine whether a service transition is required
+  ansible.builtin.set_fact:
+    serviceflow_initial_state: "{{ serviceflow_state_result.stdout | trim }}"
+    serviceflow_transition_needed: >-
+      {{
+        (
+          serviceflow_phase.action == 'start'
+          and serviceflow_state_result.rc != 0
+        )
+        or
+        (
+          serviceflow_phase.action == 'stop'
+          and serviceflow_state_result.rc == 0
+        )
+      }}
+
+- name: Run hooks before the service transition
+  ansible.builtin.include_tasks: hooks.yml
+  vars:
+    serviceflow_hook_phase: >-
+      {{
+        'before_start'
+        if serviceflow_phase.action == 'start'
+        else 'before_stop'
+      }}
+  when:
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
 - name: "{{ serviceflow_phase.action | capitalize }} {{ serviceflow_current_service.unit }} on {{ serviceflow_target_host }}"
   ansible.builtin.systemd_service:
     name: "{{ serviceflow_current_service.unit }}"
@@ -6,6 +48,15 @@
   delegate_to: "{{ serviceflow_target_host }}"
   become: "{{ serviceflow_become }}"
   register: serviceflow_systemd_result
+
+- name: Run hooks after the stop transition
+  ansible.builtin.include_tasks: hooks.yml
+  vars:
+    serviceflow_hook_phase: after_stop
+  when:
+    - serviceflow_phase.action == 'stop'
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
 
 - name: Record lifecycle operation
   ansible.builtin.set_fact:
@@ -22,6 +73,8 @@
                     'unit': serviceflow_current_service.unit,
                     'host': serviceflow_target_host,
                     'changed': serviceflow_systemd_result.changed | bool,
+                    'transition_needed': serviceflow_transition_needed | bool,
+                    'initial_state': serviceflow_initial_state,
                     'check_mode': ansible_check_mode | bool,
                     'active_state': (
                       serviceflow_systemd_result.status | default({})
