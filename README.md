@@ -106,9 +106,11 @@ ready:
   interval: 1
 ```
 
-Before a real start transition, ServiceFlow captures the log file device, inode and byte offset. After systemd starts the unit, only bytes written after that boundary can satisfy the regular expression. Existing matching lines are ignored.
+Before a real start transition, ServiceFlow captures the log file device, inode, byte offset and a small content anchor. After systemd starts the unit, only bytes written after that boundary can satisfy the regular expression. Existing matching lines are ignored.
 
-The log file may be absent when the boundary is captured. Copy-truncate and rename-based rotation are handled. ServiceFlow never removes or rewrites log content.
+The log file may be absent when the boundary is captured. Copy-truncate, same-inode rewrites and rename-based rotation are handled. ServiceFlow never removes or rewrites log content.
+
+New bytes are decoded as UTF-8 with replacement for invalid sequences. Regex matching uses a bounded rolling 64-KiB text window, which prevents unbounded memory growth and is intended for readiness messages rather than very large multi-line records.
 
 Log readiness needs an actual start transition. When the service is already active, the check is recorded as skipped with reason `no_start_transition`; ServiceFlow does not wait indefinitely for a new startup message. Check mode captures no boundary, waits for no readiness event and runs no mutation hook.
 
