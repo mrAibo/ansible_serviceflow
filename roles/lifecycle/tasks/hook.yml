@@ -10,7 +10,14 @@
     apply:
       delegate_to: "{{ serviceflow_target_host }}"
       become: "{{ serviceflow_become }}"
-  vars: "{{ serviceflow_current_hook.vars }}"
+  vars:
+    serviceflow_hook_vars: "{{ serviceflow_current_hook.vars }}"
+    serviceflow_hook_context:
+      action: "{{ serviceflow_phase.action }}"
+      phase: "{{ serviceflow_hook_phase }}"
+      service: "{{ serviceflow_current_service.name }}"
+      unit: "{{ serviceflow_current_service.unit }}"
+      target_host: "{{ serviceflow_target_host }}"
 
 - name: Record executed hook
   ansible.builtin.set_fact:
