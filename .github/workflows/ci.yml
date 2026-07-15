@@ -47,6 +47,10 @@ jobs:
             ansible-playbook --syntax-check \
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook --syntax-check \
+              -i tests/lifecycle_inventory.ini \
+              tests/hook_failure.yml
       - name: Sequential systemd lifecycle integration
         shell: bash
         run: |
@@ -55,6 +59,17 @@ jobs:
           trap 'bash tests/systemd_fixture.sh cleanup' EXIT
 
           bash tests/systemd_fixture.sh setup
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/hook_failure.yml; then
+            echo 'expected the failing hook playbook to fail' >&2
+            exit 1
+          fi
+          test "$(systemctl is-active serviceflow-alpha.service)" = active
+          test "$(systemctl is-active serviceflow-beta.service)" = active
+          test ! -s /tmp/serviceflow-order.log
+
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
