@@ -1,0 +1,68 @@
+---
+- name: Verify ServiceFlow log readiness execution
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    transition_expected: "{{ expect_transition | default(true) | bool }}"
+    serviceflow_action: start
+    serviceflow_services:
+      - name: alpha
+        groups:
+          - alpha
+        unit: serviceflow-alpha.service
+        ready:
+          type: log
+          path: /tmp/serviceflow-alpha.log
+          regex: '^Application ready$'
+          timeout: 5
+          interval: 1
+        hooks:
+          before_start:
+            - name: Record alpha before log-ready start
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: before-start-log-alpha
+          after_ready:
+            - name: Record alpha after log readiness
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: after-ready-log-alpha
+      - name: beta
+        groups:
+          - beta
+        unit: serviceflow-beta.service
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify log readiness lifecycle result
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.processed | map(attribute='service') | list == ['alpha', 'beta']
+          - serviceflow_result.readiness | length == (0 if ansible_check_mode else 1)
+          - >-
+            serviceflow_result.hooks | map(attribute='phase') | list
+            ==
+            (
+              ['before_start', 'after_ready']
+              if transition_expected and not ansible_check_mode
+              else []
+            )
+          - >-
+            ansible_check_mode
+            or serviceflow_result.readiness[0].type == 'log'
+          - >-
+            ansible_check_mode
+            or
+            (
+              serviceflow_result.readiness[0].matched | default(false) | bool
+            ) == transition_expected
+          - >-
+            ansible_check_mode
+            or
+            (
+              serviceflow_result.readiness[0].skipped | default(false) | bool
+            ) == (not transition_expected)
+          - >-
+            ansible_check_mode
+            or transition_expected
+            or serviceflow_result.readiness[0].reason == 'no_start_transition'
