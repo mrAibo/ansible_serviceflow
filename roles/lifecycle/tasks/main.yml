@@ -1,0 +1,29 @@
+---
+- name: Build validated lifecycle plan
+  ansible.builtin.set_fact:
+    serviceflow_plan_result: >-
+      {{
+        serviceflow_services
+        | mraibo.serviceflow.serviceflow_plan(groups, serviceflow_action)
+      }}
+
+- name: Initialize lifecycle result
+  ansible.builtin.set_fact:
+    serviceflow_result:
+      action: "{{ serviceflow_plan_result.action }}"
+      check_mode: "{{ ansible_check_mode }}"
+      phases: "{{ serviceflow_plan_result.phases }}"
+      skipped: "{{ serviceflow_plan_result.skipped }}"
+      processed: []
+
+- name: Show lifecycle plan in check mode
+  ansible.builtin.debug:
+    var: serviceflow_plan_result
+  when: ansible_check_mode
+
+- name: Execute lifecycle phases
+  ansible.builtin.include_tasks: phase.yml
+  loop: "{{ serviceflow_plan_result.phases }}"
+  loop_control:
+    loop_var: serviceflow_phase
+    label: "{{ serviceflow_phase.action }}"
