@@ -51,6 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee /tmp/serviceflow-integration.log) 2>&1
           trap 'bash tests/systemd_fixture.sh cleanup' EXIT
 
           bash tests/systemd_fixture.sh setup
@@ -112,3 +113,9 @@ jobs:
               -e requested_action=stop \
               -e expect_hooks=false
           test ! -s /tmp/serviceflow-order.log
+      - name: Upload lifecycle diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-diagnostics
+          path: /tmp/serviceflow-integration.log
