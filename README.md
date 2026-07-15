@@ -1,157 +1,185 @@
 # Ansible ServiceFlow
 
-Dependency-aware systemd service lifecycle orchestration for Ansible.
+Ordered, cross-host systemd lifecycle orchestration for Ansible.
 
-> **Status:** Version 0.1.0 is released after successful external acceptance testing.
+> **Status:** Version 0.1.0 passed external acceptance testing and is ready for tagged release and Galaxy publication.
 
-ServiceFlow is intended for applications whose services run on different inventory hosts and must be started or stopped in a strict order. It complements `ansible.builtin.systemd_service`; it does not replace it.
+ServiceFlow manages application stacks whose services live in different inventory groups and must follow one strict lifecycle order. It complements `ansible.builtin.systemd_service`; it does not replace or reimplement it.
 
-## Problem
+## Why ServiceFlow
 
-A conventional playbook often grows into repeated `shell: systemctl ...`, group-based `when` expressions, manual reverse ordering, log manipulation and application-specific tasks mixed into one long file.
+A normal Ansible playbook can manage individual units very well. It becomes harder to keep correct when an application needs all of the following at once:
 
-ServiceFlow keeps the application definition declarative:
+- one global start order across multiple inventory groups;
+- the exact reverse order for stop;
+- a complete stop-then-start restart;
+- application tasks immediately before or after a service boundary;
+- readiness stronger than `systemctl start` returning successfully;
+- a log message produced by the current start, not an old matching line;
+- complete configuration validation before the first service changes;
+- one structured result for the entire lifecycle.
 
-```yaml
-serviceflow_action: restart
+ServiceFlow provides that orchestration contract while continuing to use Ansible built-ins for resource operations.
 
-serviceflow_services:
-  - name: backend
-    groups: [backend]
-    unit: example-backend.service
-    ready:
-      type: log
-      path: /var/log/example/application.log
-      regex: '^Application ready$'
-      timeout: 120
-      interval: 1
-    hooks:
-      after_ready:
-        - name: Verify dependent state
-          tasks: hooks/verify_state.yml
+## How it differs from standard modules and community collections
 
-  - name: worker
-    groups: [worker]
-    unit: example-worker.service
-    ready:
-      type: systemd
-      active_state: active
-      sub_state: running
+`ansible.builtin.systemd_service` remains the correct tool for one unit operation. `ansible.builtin.wait_for`, `uri` and `service_facts` remain the correct general-purpose tools for their individual tasks. Community collections also provide many useful resource modules.
 
-  - name: api
-    groups: [api]
-    unit: example-api.service
-    hooks:
-      before_stop:
-        - name: Prepare application shutdown
-          tasks: hooks/prepare_shutdown.yml
-          vars:
-            timeout: 60
+ServiceFlow is different because it coordinates those operations as one application lifecycle:
 
-  - name: frontend
-    groups: [frontend, edge]
-    unit: example-frontend.service
+```text
+ordered service list
++ inventory group resolution
++ transition-aware task-file hooks
++ systemd or current-start log readiness
++ automatic reverse stop
++ structured lifecycle result
 ```
 
-Use the collection role from an orchestration play:
+It deliberately does not add another systemd client, dependency framework or application-specific plugin system. See [Migration and comparison](docs/MIGRATION_AND_COMPARISON.md) for detailed examples and guidance on when not to use ServiceFlow.
+
+## Installation
+
+After Galaxy publication:
+
+```bash
+ansible-galaxy collection install mraibo.serviceflow:0.1.0
+```
+
+Recommended `requirements.yml`:
 
 ```yaml
 ---
-- name: Manage the application lifecycle
+collections:
+  - name: mraibo.serviceflow
+    version: "0.1.0"
+```
+
+Requirements:
+
+- `ansible-core >= 2.15`;
+- Linux managed hosts using systemd;
+- Python available for Ansible module execution;
+- appropriate become permissions.
+
+See [Installation and compatibility](docs/INSTALLATION.md).
+
+## Minimal example
+
+```yaml
+---
+- name: Manage an application lifecycle
   hosts: localhost
   gather_facts: false
+  vars:
+    serviceflow_action: "{{ requested_action | default('restart') }}"
+    serviceflow_services:
+      - name: database
+        groups: [database]
+        unit: example-database.service
+        ready:
+          type: systemd
+          active_state: active
+          sub_state: running
+
+      - name: application
+        groups: [application]
+        unit: example-application.service
+        hooks:
+          before_stop:
+            - name: Prepare graceful shutdown
+              tasks: hooks/prepare_shutdown.yml
+        ready:
+          type: log
+          path: /var/log/example/application.log
+          regex: '^Application ready$'
+          timeout: 120
+          interval: 1
+
+      - name: frontend
+        groups: [frontend, edge]
+        exclude_groups: [maintenance]
+        unit: example-frontend.service
   roles:
     - role: mraibo.serviceflow.lifecycle
 ```
 
-The declared order is the start order. Stop uses the exact reverse order. Restart performs a complete stop followed by a complete start.
+Start order:
 
-## Hooks
-
-The implemented hook phases are:
-
-- `before_start`
-- `before_stop`
-- `after_ready`
-- `after_stop`
-
-Relative task paths are resolved from the consuming playbook directory. Hook tasks execute on the current service target host by default and retain normal Ansible behavior.
-
-Hook variables are available through `serviceflow_hook_vars`. Lifecycle details are available through `serviceflow_hook_context`:
-
-```yaml
----
-- name: Show shutdown context
-  ansible.builtin.debug:
-    msg: >-
-      Preparing {{ serviceflow_hook_context.service }} on
-      {{ serviceflow_hook_context.target_host }} with timeout
-      {{ serviceflow_hook_vars.timeout }} seconds
+```text
+database → application → frontend
 ```
 
-Hooks run only when the requested systemd state requires a real transition. They do not run in check mode or for an already satisfied state. `after_ready` runs only after a successful readiness check following a real start transition. A hook failure aborts the lifecycle before the following service operation; errors are never suppressed implicitly.
+Stop order:
 
-## Systemd readiness
-
-```yaml
-ready:
-  type: systemd
-  active_state: active
-  sub_state: running
-  timeout: 60
-  interval: 2
+```text
+frontend → application → database
 ```
 
-`active_state` defaults to `active`. `sub_state` is optional. `timeout` and `interval` are positive integers in seconds and default to `60` and `2`.
+Restart performs the complete stop sequence followed by the complete start sequence.
 
-Systemd readiness is verified after every normal start action, including an idempotent start of an already-active service. This detects a service whose systemd state does not match the declared boundary.
+For a copyable project layout, inventory, hooks and commands, see [Quick start](docs/QUICKSTART.md).
 
-## New-log-entry readiness
+## Key behavior
 
-```yaml
-ready:
-  type: log
-  path: /var/log/example/application.log
-  regex: '^Application ready$'
-  timeout: 60
-  interval: 1
-```
-
-Before a real start transition, ServiceFlow captures the log file device, inode, byte offset and a small content anchor. After systemd starts the unit, only bytes written after that boundary can satisfy the regular expression. Existing matching lines are ignored.
-
-The log file may be absent when the boundary is captured. Copy-truncate, same-inode rewrites and rename-based rotation are handled. ServiceFlow never removes or rewrites log content.
-
-New bytes are decoded as UTF-8 with replacement for invalid sequences. Regex matching uses a bounded rolling 64-KiB text window, which prevents unbounded memory growth and is intended for readiness messages rather than very large multi-line records.
-
-Log readiness needs an actual start transition. When the service is already active, the check is recorded as skipped with reason `no_start_transition`; ServiceFlow does not wait indefinitely for a new startup message. Check mode captures no boundary, waits for no readiness event and runs no mutation hook.
-
-## Failure behavior and results
-
-A readiness failure stops the lifecycle before the next service is processed. A service that was successfully started before its readiness timeout remains started; automatic rollback is outside the current scope.
-
-Successful and skipped checks are returned in `serviceflow_result.readiness`. Log results include bytes examined, elapsed time, rotation and truncation counts, without returning log contents.
-
-## Version 0.1.0 scope
-
-Version 0.1.0 includes:
-
-- ordered start and reverse-order stop;
-- restart as full stop plus full start;
-- target resolution from inventory groups;
-- `manage` and `exclude_groups` selection;
-- native task-file hooks around service transitions;
-- readiness through systemd state or a new log entry;
-- check-mode planning;
-- structured results and clear validation errors.
-
-Arbitrary dependency graphs, parallel execution, rolling restarts, containers and platform-specific application integrations are intentionally deferred.
+- Services and resolved hosts are processed sequentially.
+- Hosts from multiple groups are merged and deduplicated.
+- `exclude_groups` removes maintenance or otherwise excluded hosts.
+- `manage` must evaluate to a boolean and can skip a complete service entry.
+- Hooks are native task files: `before_start`, `before_stop`, `after_ready`, `after_stop`.
+- Systemd readiness checks expected `ActiveState` and optional `SubState`.
+- Log readiness accepts only bytes written after the current start boundary.
+- Existing matching log lines are ignored.
+- Log files are never deleted, rewritten or returned in results.
+- Check mode validates and predicts without running hooks or waiting for future readiness.
+- The lifecycle stops on the first validation, hook, service or readiness failure.
+- Version 0.1.0 does not automatically roll back a unit that started but failed readiness.
 
 ## Documentation
 
-- [MVP design](docs/DESIGN.md)
-- [Acceptance guide](docs/ACCEPTANCE.md)
+- [Installation and compatibility](docs/INSTALLATION.md)
+- [Quick start](docs/QUICKSTART.md)
+- [Complete configuration reference](docs/REFERENCE.md)
+- [Lifecycle hooks](docs/HOOKS.md)
+- [Structured results](docs/RESULTS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Migration and comparison](docs/MIGRATION_AND_COMPARISON.md)
+- [Architecture and execution model](docs/DESIGN.md)
+- [External acceptance guide](docs/ACCEPTANCE.md)
 - [Changelog](CHANGELOG.md)
-- [MVP tracker](https://github.com/mrAibo/ansible_serviceflow/issues/1)
+
+Installed documentation is also available through:
+
+```bash
+ansible-doc -t role mraibo.serviceflow.lifecycle
+ansible-doc mraibo.serviceflow.log_readiness
+```
+
+## Version 0.1.0 scope
+
+Included:
+
+- ordered start and reverse-order stop;
+- restart as full stop plus full start;
+- group resolution, deduplication, exclusions and `manage` selection;
+- transition-aware task-file hooks;
+- systemd readiness;
+- new-log-entry readiness with rotation and truncation handling;
+- check-mode planning;
+- structured results and fail-fast validation.
+
+Deferred:
+
+- arbitrary dependency graphs;
+- parallel or rolling execution;
+- automatic rollback;
+- HTTP and port readiness;
+- non-systemd service managers;
+- container and Kubernetes lifecycle management.
+
+## Security
+
+Application hooks are trusted code owned by the consuming project. Keep secrets in Ansible Vault or an approved secret backend, use `no_log` for sensitive operations and never commit product-specific hosts, credentials or proprietary log content to this repository.
 
 ## License
 

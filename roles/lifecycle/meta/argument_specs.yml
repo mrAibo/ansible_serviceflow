@@ -4,7 +4,8 @@ argument_specs:
     short_description: Execute an ordered systemd service lifecycle
     description:
       - Validates and executes ordered start, reverse-order stop, or full restart phases.
-      - Resolves service targets from Ansible inventory groups.
+      - Resolves service targets from Ansible inventory groups and processes them sequentially.
+      - Supports transition-aware task-file hooks and systemd or new-log-entry readiness.
     options:
       serviceflow_action:
         description: Lifecycle action to execute.
@@ -15,39 +16,108 @@ argument_specs:
           - restart
         default: start
       serviceflow_services:
-        description: Ordered service definitions.
+        description:
+          - Ordered service definitions.
+          - The list order is the start order; stop uses the exact reverse order.
         type: list
         elements: dict
         required: true
         options:
           name:
-            description: Unique logical service name.
+            description: Unique logical service name used in results and hook context.
             type: str
             required: true
           unit:
-            description: systemd unit name.
+            description: systemd unit name managed through ansible.builtin.systemd_service.
             type: str
             required: true
           groups:
-            description: Inventory groups whose hosts run the unit.
+            description:
+              - Inventory groups whose hosts run the unit.
+              - Hosts from all groups are merged and deduplicated in stable order.
             type: list
             elements: str
             required: true
           exclude_groups:
-            description: Inventory groups whose hosts are excluded.
+            description: Inventory groups whose hosts are removed after positive group resolution.
             type: list
             elements: str
             default: []
           manage:
-            description: Whether the complete service entry is managed.
+            description:
+              - Whether the complete service entry is managed.
+              - The value must already evaluate to a boolean.
             type: bool
             default: true
           hooks:
             description: Native task-file hooks keyed by lifecycle phase.
             type: dict
+            options:
+              before_start:
+                description: Task-file hooks executed before a required start transition.
+                type: list
+                elements: dict
+                options: &hook_options
+                  name:
+                    description: Descriptive hook name used in output and results.
+                    type: str
+                  tasks:
+                    description: Task-file path resolved from playbook_dir when relative.
+                    type: path
+                    required: true
+                  vars:
+                    description: Values exposed to the task file as serviceflow_hook_vars.
+                    type: dict
+                    default: {}
+              before_stop:
+                description: Task-file hooks executed before a required stop transition.
+                type: list
+                elements: dict
+                options: *hook_options
+              after_ready:
+                description: Task-file hooks executed after successful readiness for a real start transition.
+                type: list
+                elements: dict
+                options: *hook_options
+              after_stop:
+                description: Task-file hooks executed after a successful real stop transition.
+                type: list
+                elements: dict
+                options: *hook_options
           ready:
-            description: Optional systemd or new-log-entry readiness definition.
+            description:
+              - Optional readiness definition.
+              - Type-specific fields are validated before the first service transition.
             type: dict
+            options:
+              type:
+                description: Readiness implementation.
+                type: str
+                required: true
+                choices:
+                  - systemd
+                  - log
+              active_state:
+                description: Expected systemd ActiveState for systemd readiness.
+                type: str
+                default: active
+              sub_state:
+                description: Optional expected systemd SubState for systemd readiness.
+                type: str
+              path:
+                description: Absolute application log path for log readiness.
+                type: path
+              regex:
+                description: Regular expression that must match only newly written log data.
+                type: str
+              timeout:
+                description: Maximum readiness wait in seconds.
+                type: int
+                default: 60
+              interval:
+                description: Delay between readiness attempts in seconds.
+                type: int
+                default: 2
       serviceflow_become:
         description: Use privilege escalation for service, hook, and readiness operations.
         type: bool
