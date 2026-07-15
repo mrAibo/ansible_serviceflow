@@ -4,15 +4,48 @@
   gather_facts: false
   vars:
     serviceflow_action: "{{ requested_action | default('restart') }}"
+    hooks_expected: "{{ expect_hooks | default(true) | bool }}"
     serviceflow_services:
       - name: alpha
         groups:
           - alpha
         unit: serviceflow-alpha.service
+        hooks:
+          before_start:
+            - name: Record alpha before start
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: before-start-alpha
+          before_stop:
+            - name: Record alpha before stop
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: before-stop-alpha
+          after_stop:
+            - name: Record alpha after stop
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: after-stop-alpha
       - name: beta
         groups:
           - beta
         unit: serviceflow-beta.service
+        hooks:
+          before_start:
+            - name: Record beta before start
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: before-start-beta
+          before_stop:
+            - name: Record beta before stop
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: before-stop-beta
+          after_stop:
+            - name: Record beta after stop
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: after-stop-beta
     expected_actions:
       start:
         - start
@@ -49,6 +82,50 @@
         - alpha
         - alpha
         - beta
+    expected_hook_phases:
+      start:
+        - before_start
+        - before_start
+      stop:
+        - before_stop
+        - after_stop
+        - before_stop
+        - after_stop
+      restart:
+        - before_stop
+        - after_stop
+        - before_stop
+        - after_stop
+        - before_start
+        - before_start
+    expected_hook_services:
+      start:
+        - alpha
+        - beta
+      stop:
+        - beta
+        - beta
+        - alpha
+        - alpha
+      restart:
+        - beta
+        - beta
+        - alpha
+        - alpha
+        - alpha
+        - beta
+    effective_hook_phases: >-
+      {{
+        []
+        if ansible_check_mode or not hooks_expected
+        else expected_hook_phases[serviceflow_action]
+      }}
+    effective_hook_services: >-
+      {{
+        []
+        if ansible_check_mode or not hooks_expected
+        else expected_hook_services[serviceflow_action]
+      }}
   roles:
     - role: mraibo.serviceflow.lifecycle
   tasks:
@@ -60,4 +137,6 @@
           - serviceflow_result.processed | map(attribute='action') | list == expected_actions[serviceflow_action]
           - serviceflow_result.processed | map(attribute='service') | list == expected_services[serviceflow_action]
           - serviceflow_result.processed | map(attribute='host') | list == expected_hosts[serviceflow_action]
+          - serviceflow_result.hooks | map(attribute='phase') | list == effective_hook_phases
+          - serviceflow_result.hooks | map(attribute='service') | list == effective_hook_services
           - serviceflow_result.skipped == []
