@@ -8,7 +8,7 @@ A general dependency graph is deliberately deferred. The ordered model covers th
 
 ## Execution model
 
-The lifecycle role runs from an orchestration play and resolves target hosts through Ansible inventory groups. Service operations are delegated to the resolved managed hosts.
+The lifecycle role runs from an orchestration play and resolves target hosts through Ansible inventory groups. Service and readiness operations are delegated to the resolved managed hosts.
 
 A service may name multiple groups. Their hosts are merged in inventory order and deduplicated. `exclude_groups` removes matching hosts. `manage` is an already evaluated boolean that can skip the complete service entry.
 
@@ -23,9 +23,11 @@ For every managed service in declared order and for every resolved host:
 1. read the current systemd active state without modifying the unit;
 2. run `before_start` hooks only when a start transition is required;
 3. request `state: started` through `ansible.builtin.systemd_service`;
-4. record the initial state, predicted or actual change and final status.
+4. verify configured systemd readiness when present;
+5. run `after_ready` hooks only after readiness succeeds for a real start transition;
+6. record the initial state, predicted or actual change, final state and readiness result.
 
-Readiness and `after_ready` will be inserted after the systemd start when their boundaries are implemented.
+Systemd readiness is verified for every normal start action, including an already-active service. This makes `start` both idempotent and health-verifying when `ready` is configured. Mutation hooks remain transition-aware and do not rerun for an already satisfied state.
 
 ### Stop
 
@@ -58,9 +60,10 @@ The implemented phases are:
 
 - `before_start`
 - `before_stop`
+- `after_ready`
 - `after_stop`
 
-`after_ready` remains reserved and is rejected until readiness itself is implemented.
+`after_ready` requires a readiness definition. It runs only after a successful readiness check following a real start transition.
 
 Relative task paths are resolved from the consuming playbook directory. Absolute paths are accepted. Included hook tasks execute on the current service target host by default and retain native Ansible behavior such as loops, registers, assertions and explicit task-level delegation.
 
@@ -78,26 +81,40 @@ Hooks run only for a required transition. They do not run for an already satisfi
 
 ## Readiness
 
-The remaining MVP will support:
+The implemented readiness type is `systemd`:
 
-- `systemd`: required `ActiveState` and optional `SubState`;
-- `log`: a regular expression must occur in data written after the current start boundary.
+```yaml
+ready:
+  type: systemd
+  active_state: active
+  sub_state: running
+  timeout: 60
+  interval: 2
+```
 
-Log readiness records the file identity and byte offset before starting the service. Existing matching lines cannot satisfy the check. Rotation and truncation behavior must be covered by tests before the feature is accepted.
+`active_state` defaults to `active`. `sub_state` is optional. `timeout` and `interval` are positive integer seconds and default to `60` and `2`.
+
+The planner converts the time boundary into a bounded number of attempts: one immediate state read plus enough delayed attempts to reach or slightly exceed the configured timeout. Each attempt reads `ActiveState` and `SubState` through `systemctl show` without changing the unit.
+
+A failed readiness check stops the lifecycle before the next service is processed. The failure message includes the expected states and the last observed systemd state. A successfully started service is not automatically stopped after readiness failure; rollback remains outside the current scope.
+
+Successful checks are stored in `serviceflow_result.readiness` with service, unit, host, observed states and attempt count.
+
+The remaining MVP readiness type is `log`: a regular expression must occur in data written after the current start boundary. Log readiness must record file identity and byte offset before starting the service. Existing matching lines cannot satisfy the check. Rotation and truncation behavior must be covered by tests before the feature is accepted.
 
 Port and HTTP checks are useful follow-up features, but standard Ansible modules already cover them and they are not required to prove the orchestration model.
 
 ## Validation and check mode
 
-The complete configuration and execution plan must be validated before the first service transition. Current validation includes actions, unique service names, unit names, group existence, non-empty resolved hosts, supported hook phases, hook task paths and hook variable mappings.
+The complete configuration and execution plan must be validated before the first service transition. Current validation includes actions, unique service names, unit names, group existence, non-empty resolved hosts, supported hook phases, hook task paths, hook variable mappings and systemd readiness fields.
 
-Unknown service fields and deferred readiness definitions fail before a service is changed.
+Unknown service, hook and readiness fields fail before a service is changed. `after_ready` without `ready` also fails during planning.
 
 Check mode reports the ordered plan and uses native `systemd_service` change prediction. It does not change a service, run mutation hooks or wait for readiness events that depend on a future start.
 
 ## Failure behavior
 
-The implementation stops at the first service or hook failure. A failing `before_stop` hook prevents the unit stop; errors are not suppressed.
+The implementation stops at the first service, hook or readiness failure. A failing `before_stop` hook prevents the unit stop. A readiness failure prevents later services and `after_ready` hooks; errors are not suppressed.
 
 Automatic rollback is deferred until the project can reliably distinguish services changed by the current run from services that were already active.
 
