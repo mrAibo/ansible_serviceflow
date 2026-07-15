@@ -15,6 +15,7 @@
       phases: "{{ serviceflow_plan_result.phases }}"
       skipped: "{{ serviceflow_plan_result.skipped }}"
       processed: []
+      hooks: []
 
 - name: Show lifecycle plan in check mode
   ansible.builtin.debug:
