@@ -8,8 +8,10 @@ from ansible.errors import AnsibleFilterError
 
 _ALLOWED_ACTIONS = ("start", "stop", "restart")
 _ALLOWED_SERVICE_FIELDS = frozenset(
-    {"name", "unit", "groups", "exclude_groups", "manage"}
+    {"name", "unit", "groups", "exclude_groups", "manage", "hooks"}
 )
+_ALLOWED_HOOK_PHASES = ("before_start", "before_stop", "after_stop")
+_ALLOWED_HOOK_FIELDS = frozenset({"name", "tasks", "vars"})
 
 
 def _fail(message):
@@ -39,8 +41,14 @@ def _group_members(group_name, inventory_groups, field):
     if group_name not in inventory_groups:
         _fail(f"{field} references missing inventory group '{group_name}'")
 
-    members = _sequence(inventory_groups[group_name], f"inventory group '{group_name}'")
-    return [_text(host, f"inventory group '{group_name}' host") for host in members]
+    members = _sequence(
+        inventory_groups[group_name],
+        f"inventory group '{group_name}'",
+    )
+    return [
+        _text(host, f"inventory group '{group_name}' host")
+        for host in members
+    ]
 
 
 def _resolve_hosts(service_name, group_names, exclude_group_names, inventory_groups):
@@ -48,7 +56,12 @@ def _resolve_hosts(service_name, group_names, exclude_group_names, inventory_gro
     seen = set()
 
     for group_name in group_names:
-        for host in _group_members(group_name, inventory_groups, f"service '{service_name}'.groups"):
+        members = _group_members(
+            group_name,
+            inventory_groups,
+            f"service '{service_name}'.groups",
+        )
+        for host in members:
             if host not in seen:
                 hosts.append(host)
                 seen.add(host)
@@ -67,6 +80,56 @@ def _resolve_hosts(service_name, group_names, exclude_group_names, inventory_gro
     if not resolved:
         _fail(f"service '{service_name}' resolves to no target hosts")
     return resolved
+
+
+def _hooks(value, field):
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        _fail(f"{field} must be a mapping")
+
+    unsupported_phases = sorted(
+        str(phase) for phase in value if phase not in _ALLOWED_HOOK_PHASES
+    )
+    if unsupported_phases:
+        _fail(
+            f"{field} contains unsupported phases: "
+            + ", ".join(unsupported_phases)
+        )
+
+    normalized = {}
+    for phase, entries in value.items():
+        phase_field = f"{field}.{phase}"
+        normalized[phase] = []
+        for index, hook in enumerate(_sequence(entries, phase_field)):
+            hook_field = f"{phase_field}[{index}]"
+            if not isinstance(hook, Mapping):
+                _fail(f"{hook_field} must be a mapping")
+
+            unsupported_fields = sorted(
+                str(key) for key in hook if key not in _ALLOWED_HOOK_FIELDS
+            )
+            if unsupported_fields:
+                _fail(
+                    f"{hook_field} contains unsupported fields: "
+                    + ", ".join(unsupported_fields)
+                )
+
+            tasks = _text(hook.get("tasks"), f"{hook_field}.tasks")
+            name = _text(hook.get("name", tasks), f"{hook_field}.name")
+            variables = hook.get("vars", {})
+            if not isinstance(variables, Mapping):
+                _fail(f"{hook_field}.vars must be a mapping")
+
+            normalized[phase].append(
+                {
+                    "name": name,
+                    "tasks": tasks,
+                    "vars": dict(variables),
+                }
+            )
+
+    return normalized
 
 
 def _phase(action, services):
@@ -120,6 +183,7 @@ def serviceflow_plan(services, inventory_groups, action):
                 f"service '{name}'.exclude_groups",
             )
         ]
+        hooks = _hooks(service.get("hooks"), f"service '{name}'.hooks")
 
         manage = service.get("manage", True)
         if type(manage) is not bool:
@@ -138,6 +202,7 @@ def serviceflow_plan(services, inventory_groups, action):
                     exclude_group_names,
                     inventory_groups,
                 ),
+                "hooks": hooks,
             }
         )
 
