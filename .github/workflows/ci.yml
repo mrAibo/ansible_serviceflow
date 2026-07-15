@@ -60,7 +60,17 @@ jobs:
               tests/lifecycle.yml \
               -e requested_action=restart
           diff -u \
-            <(printf 'stop-beta\nstop-alpha\nstart-alpha\nstart-beta\n') \
+            <(printf '%s\n' \
+              before-stop-beta \
+              stop-beta \
+              after-stop-beta \
+              before-stop-alpha \
+              stop-alpha \
+              after-stop-alpha \
+              before-start-alpha \
+              start-alpha \
+              before-start-beta \
+              start-beta) \
             /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
@@ -78,6 +88,27 @@ jobs:
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml \
               -e requested_action=start
-          diff -u \
-            <(printf 'start-alpha\nstart-beta\n') \
-            /tmp/serviceflow-order.log
+          printf '%s\n' \
+            before-start-alpha \
+            start-alpha \
+            before-start-beta \
+            start-beta \
+            > /tmp/serviceflow-expected.log
+          diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
+
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=start \
+              -e expect_hooks=false
+          diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
+
+          bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/lifecycle.yml \
+              -e requested_action=stop \
+              -e expect_hooks=false
+          test ! -s /tmp/serviceflow-order.log
