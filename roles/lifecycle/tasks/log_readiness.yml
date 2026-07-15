@@ -1,0 +1,80 @@
+---
+- name: Wait for new log readiness data
+  when: serviceflow_transition_needed | bool
+  block:
+    - name: Wait for {{ serviceflow_current_service.unit }} log readiness on {{ serviceflow_target_host }}
+      mraibo.serviceflow.log_readiness:
+        action: wait
+        path: "{{ serviceflow_current_service.ready.path }}"
+        regex: "{{ serviceflow_current_service.ready.regex }}"
+        boundary: "{{ serviceflow_log_boundary_result.boundary }}"
+        timeout: "{{ serviceflow_current_service.ready.timeout }}"
+        interval: "{{ serviceflow_current_service.ready.interval }}"
+      delegate_to: "{{ serviceflow_target_host }}"
+      become: "{{ serviceflow_become }}"
+      register: serviceflow_log_readiness_result
+  rescue:
+    - name: Report log readiness failure
+      ansible.builtin.fail:
+        msg: >-
+          ServiceFlow log readiness failed for
+          {{ serviceflow_current_service.unit }} on
+          {{ serviceflow_target_host }}: {{
+          serviceflow_log_readiness_result.msg | default('unknown error') }}.
+          New bytes examined: {{
+          serviceflow_log_readiness_result.bytes_read | default(0) }};
+          rotations: {{
+          serviceflow_log_readiness_result.rotations | default(0) }};
+          truncations: {{
+          serviceflow_log_readiness_result.truncations | default(0) }}.
+
+- name: Record successful log readiness result
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'readiness': serviceflow_result.readiness
+              + [
+                  {
+                    'type': 'log',
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host,
+                    'path': serviceflow_current_service.ready.path,
+                    'matched': true,
+                    'bytes_read': serviceflow_log_readiness_result.bytes_read,
+                    'elapsed': serviceflow_log_readiness_result.elapsed,
+                    'rotations': serviceflow_log_readiness_result.rotations,
+                    'truncations': serviceflow_log_readiness_result.truncations
+                  }
+                ]
+            }
+          )
+      }}
+  when: serviceflow_transition_needed | bool
+
+- name: Record skipped log readiness without a start transition
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'readiness': serviceflow_result.readiness
+              + [
+                  {
+                    'type': 'log',
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host,
+                    'path': serviceflow_current_service.ready.path,
+                    'skipped': true,
+                    'reason': 'no_start_transition'
+                  }
+                ]
+            }
+          )
+      }}
+  when: not serviceflow_transition_needed | bool
