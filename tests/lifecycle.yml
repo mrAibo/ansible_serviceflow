@@ -1,0 +1,63 @@
+---
+- name: Verify ServiceFlow lifecycle execution
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: "{{ requested_action | default('restart') }}"
+    serviceflow_services:
+      - name: alpha
+        groups:
+          - alpha
+        unit: serviceflow-alpha.service
+      - name: beta
+        groups:
+          - beta
+        unit: serviceflow-beta.service
+    expected_actions:
+      start:
+        - start
+        - start
+      stop:
+        - stop
+        - stop
+      restart:
+        - stop
+        - stop
+        - start
+        - start
+    expected_services:
+      start:
+        - alpha
+        - beta
+      stop:
+        - beta
+        - alpha
+      restart:
+        - beta
+        - alpha
+        - alpha
+        - beta
+    expected_hosts:
+      start:
+        - alpha
+        - beta
+      stop:
+        - beta
+        - alpha
+      restart:
+        - beta
+        - alpha
+        - alpha
+        - beta
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify structured lifecycle result
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.action == serviceflow_action
+          - serviceflow_result.check_mode | bool == ansible_check_mode
+          - serviceflow_result.processed | map(attribute='action') | list == expected_actions[serviceflow_action]
+          - serviceflow_result.processed | map(attribute='service') | list == expected_services[serviceflow_action]
+          - serviceflow_result.processed | map(attribute='host') | list == expected_hosts[serviceflow_action]
+          - serviceflow_result.skipped == []
