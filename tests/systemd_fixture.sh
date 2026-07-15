@@ -2,10 +2,18 @@
 set -euo pipefail
 
 log=/tmp/serviceflow-order.log
+readiness_log=/tmp/serviceflow-alpha.log
+suppress_readiness=/tmp/serviceflow-suppress-alpha-ready
 units=(serviceflow-alpha.service serviceflow-beta.service)
 
 write_unit() {
     local name=$1
+    local start_command
+
+    start_command="printf \"start-${name}\\n\" >> ${log}"
+    if [[ $name == alpha ]]; then
+        start_command+="; if [ ! -e ${suppress_readiness} ]; then printf \"Application ready\\n\" >> ${readiness_log}; fi"
+    fi
 
     sudo tee "/etc/systemd/system/serviceflow-${name}.service" >/dev/null <<EOF
 [Unit]
@@ -13,7 +21,7 @@ Description=ServiceFlow ${name} integration fixture
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'printf "start-${name}\\n" >> ${log}'
+ExecStart=/bin/sh -c '${start_command}'
 ExecStop=/bin/sh -c 'printf "stop-${name}\\n" >> ${log}'
 RemainAfterExit=yes
 EOF
@@ -25,6 +33,9 @@ case "${1:-}" in
         write_unit beta
         sudo touch "$log"
         sudo chmod 0644 "$log"
+        printf 'Application ready\n' | sudo tee "$readiness_log" >/dev/null
+        sudo chmod 0644 "$readiness_log"
+        sudo rm -f "$suppress_readiness"
         sudo systemctl daemon-reload
         sudo systemctl start "${units[@]}"
         sudo truncate -s 0 "$log"
@@ -32,17 +43,23 @@ case "${1:-}" in
     reset)
         sudo systemctl stop "${units[@]}"
         sudo truncate -s 0 "$log"
+        sudo rm -f "$suppress_readiness"
+        ;;
+    suppress-readiness)
+        sudo touch "$suppress_readiness"
         ;;
     cleanup)
         sudo systemctl stop "${units[@]}" 2>/dev/null || true
         sudo rm -f \
             /etc/systemd/system/serviceflow-alpha.service \
             /etc/systemd/system/serviceflow-beta.service \
-            "$log"
+            "$log" \
+            "$readiness_log" \
+            "$suppress_readiness"
         sudo systemctl daemon-reload
         ;;
     *)
-        echo "usage: $0 {setup|reset|cleanup}" >&2
+        echo "usage: $0 {setup|reset|suppress-readiness|cleanup}" >&2
         exit 2
         ;;
 esac
