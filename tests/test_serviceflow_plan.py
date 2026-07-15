@@ -96,6 +96,31 @@ def main():
     }
     assert start["phases"][0]["services"][1]["ready"] is None
 
+    log_plan = MODULE.serviceflow_plan(
+        [
+            {
+                "name": "backend",
+                "groups": ["backend"],
+                "unit": "example-backend.service",
+                "ready": {
+                    "type": "log",
+                    "path": "/var/log/example/application.log",
+                    "regex": "^Application ready$",
+                    "timeout": 30,
+                },
+            }
+        ],
+        groups,
+        "start",
+    )
+    assert log_plan["phases"][0]["services"][0]["ready"] == {
+        "type": "log",
+        "path": "/var/log/example/application.log",
+        "regex": "^Application ready$",
+        "timeout": 30,
+        "interval": 1,
+    }
+
     stop = MODULE.serviceflow_plan(services, groups, "stop")
     assert service_names(stop) == ["frontend", "backend"]
 
@@ -156,13 +181,13 @@ def main():
         "start",
     )
     expect_error(
-        "ready.type must be 'systemd'",
+        "ready.type must be one of: systemd, log",
         [
             {
                 "name": "bad-type",
                 "groups": ["frontend"],
                 "unit": "bad-type.service",
-                "ready": {"type": "log"},
+                "ready": {"type": "http"},
             }
         ],
         groups,
@@ -185,10 +210,62 @@ def main():
         "ready contains unsupported fields: regex",
         [
             {
-                "name": "bad-field",
+                "name": "bad-systemd-field",
                 "groups": ["frontend"],
-                "unit": "bad-field.service",
+                "unit": "bad-systemd-field.service",
                 "ready": {"type": "systemd", "regex": "ready"},
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "ready contains unsupported fields: active_state",
+        [
+            {
+                "name": "bad-log-field",
+                "groups": ["frontend"],
+                "unit": "bad-log-field.service",
+                "ready": {
+                    "type": "log",
+                    "path": "/var/log/example/application.log",
+                    "regex": "ready",
+                    "active_state": "active",
+                },
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "ready.path must be absolute",
+        [
+            {
+                "name": "relative-log",
+                "groups": ["frontend"],
+                "unit": "relative-log.service",
+                "ready": {
+                    "type": "log",
+                    "path": "application.log",
+                    "regex": "ready",
+                },
+            }
+        ],
+        groups,
+        "start",
+    )
+    expect_error(
+        "ready.regex is invalid",
+        [
+            {
+                "name": "bad-regex",
+                "groups": ["frontend"],
+                "unit": "bad-regex.service",
+                "ready": {
+                    "type": "log",
+                    "path": "/var/log/example/application.log",
+                    "regex": "[",
+                },
             }
         ],
         groups,
