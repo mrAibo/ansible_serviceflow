@@ -9,7 +9,7 @@ module: log_readiness
 short_description: Wait for a regular expression in newly written log data
 version_added: "0.1.0"
 description:
-  - Captures a file identity and byte offset before a service transition.
+  - Captures a file identity, byte offset and content anchor before a service transition.
   - Waits only in data written after that boundary.
   - Handles file creation, copy-truncate and rename-based rotation.
 options:
@@ -61,7 +61,7 @@ EXAMPLES = r'''
 
 RETURN = r'''
 boundary:
-  description: Captured file identity and byte offset.
+  description: Captured file identity, byte offset and content anchor.
   returned: action is capture
   type: dict
 matched:
@@ -81,16 +81,18 @@ rotations:
   returned: action is wait
   type: int
 truncations:
-  description: Number of detected size reductions for a tracked identity.
+  description: Number of detected truncations or same-inode rewrites.
   returned: action is wait
   type: int
 '''
 
+import hashlib
 import os
 import re
 import stat
 import time
 
+_ANCHOR_SIZE = 4096
 _CHUNK_SIZE = 64 * 1024
 _TAIL_LIMIT = 64 * 1024
 
@@ -111,6 +113,19 @@ def _regular_stat(path):
     return file_stat
 
 
+def _anchor(path, offset):
+    length = min(offset, _ANCHOR_SIZE)
+    anchor_offset = offset - length
+    with open(path, "rb") as stream:
+        stream.seek(anchor_offset)
+        data = stream.read(length)
+    return {
+        "anchor_offset": anchor_offset,
+        "anchor_length": len(data),
+        "anchor_sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
 def capture_boundary(path):
     file_stat = _regular_stat(path)
     if file_stat is None:
@@ -119,12 +134,16 @@ def capture_boundary(path):
             "device": None,
             "inode": None,
             "offset": 0,
+            "anchor_offset": 0,
+            "anchor_length": 0,
+            "anchor_sha256": None,
         }
     return {
         "exists": True,
         "device": file_stat.st_dev,
         "inode": file_stat.st_ino,
         "offset": file_stat.st_size,
+        **_anchor(path, file_stat.st_size),
     }
 
 
@@ -135,15 +154,60 @@ def _normalized_boundary(boundary):
     if type(exists) is not bool:
         raise ValueError("boundary.exists must be a boolean")
     if not exists:
-        return {"exists": False, "device": None, "inode": None, "offset": 0}
+        return {
+            "exists": False,
+            "device": None,
+            "inode": None,
+            "offset": 0,
+            "anchor_offset": 0,
+            "anchor_length": 0,
+            "anchor_sha256": None,
+        }
 
     normalized = {"exists": True}
-    for key in ("device", "inode", "offset"):
+    for key in ("device", "inode", "offset", "anchor_offset", "anchor_length"):
         value = boundary.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"boundary.{key} must be a non-negative integer")
         normalized[key] = value
+
+    digest = boundary.get("anchor_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError("boundary.anchor_sha256 must be a SHA-256 hex digest")
+    normalized["anchor_sha256"] = digest
     return normalized
+
+
+def _anchor_matches(path, tracked):
+    if tracked.get("anchor_sha256") is None:
+        return True
+
+    end = tracked["anchor_offset"] + tracked["anchor_length"]
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(tracked["anchor_offset"])
+            data = stream.read(tracked["anchor_length"])
+    except FileNotFoundError:
+        return False
+
+    return (
+        len(data) == tracked["anchor_length"]
+        and end <= tracked["offset"]
+        and hashlib.sha256(data).hexdigest() == tracked["anchor_sha256"]
+    )
+
+
+def _refresh_anchor(path, tracked):
+    try:
+        tracked.update(_anchor(path, tracked["offset"]))
+    except FileNotFoundError:
+        tracked.update(
+            {
+                "anchor_offset": 0,
+                "anchor_length": 0,
+                "anchor_sha256": None,
+            }
+        )
 
 
 def _identity_matches(file_stat, tracked):
@@ -210,16 +274,45 @@ def _state_snapshot(path, tracked):
     }
 
 
+def _tracked_from_boundary(boundary):
+    if not boundary["exists"]:
+        return None
+    return {
+        "device": boundary["device"],
+        "inode": boundary["inode"],
+        "offset": boundary["offset"],
+        "anchor_offset": boundary["anchor_offset"],
+        "anchor_length": boundary["anchor_length"],
+        "anchor_sha256": boundary["anchor_sha256"],
+    }
+
+
+def _new_tracking(file_stat):
+    return {
+        "device": file_stat.st_dev,
+        "inode": file_stat.st_ino,
+        "offset": 0,
+        "anchor_offset": 0,
+        "anchor_length": 0,
+        "anchor_sha256": None,
+    }
+
+
+def _matched_result(path, tracked, started, bytes_read, rotations, truncations):
+    return {
+        "matched": True,
+        "elapsed": time.monotonic() - started,
+        "bytes_read": bytes_read,
+        "rotations": rotations,
+        "truncations": truncations,
+        **_state_snapshot(path, tracked),
+    }
+
+
 def wait_for_match(path, regex, boundary, timeout, interval):
     pattern = re.compile(regex, re.MULTILINE)
     boundary = _normalized_boundary(boundary)
-    tracked = None
-    if boundary["exists"]:
-        tracked = {
-            "device": boundary["device"],
-            "inode": boundary["inode"],
-            "offset": boundary["offset"],
-        }
+    tracked = _tracked_from_boundary(boundary)
 
     started = time.monotonic()
     deadline = started + timeout
@@ -232,10 +325,15 @@ def wait_for_match(path, regex, boundary, timeout, interval):
         if tracked is not None:
             tracked_path, tracked_stat = _locate_identity(path, tracked)
             if tracked_path is not None:
-                if tracked_stat.st_size < tracked["offset"]:
+                if (
+                    tracked_stat.st_size < tracked["offset"]
+                    or not _anchor_matches(tracked_path, tracked)
+                ):
                     tracked["offset"] = 0
+                    tracked["anchor_sha256"] = None
                     buffer = ""
                     truncations += 1
+
                 (
                     tracked["offset"],
                     buffer,
@@ -244,24 +342,21 @@ def wait_for_match(path, regex, boundary, timeout, interval):
                 ) = _read_new_data(tracked_path, tracked["offset"], pattern, buffer)
                 bytes_read += read_count
                 if matched:
-                    return {
-                        "matched": True,
-                        "elapsed": time.monotonic() - started,
-                        "bytes_read": bytes_read,
-                        "rotations": rotations,
-                        "truncations": truncations,
-                        **_state_snapshot(path, tracked),
-                    }
+                    return _matched_result(
+                        path,
+                        tracked,
+                        started,
+                        bytes_read,
+                        rotations,
+                        truncations,
+                    )
+                _refresh_anchor(tracked_path, tracked)
 
         current_stat = _regular_stat(path)
         if current_stat is not None and not _identity_matches(current_stat, tracked):
             if tracked is not None:
                 rotations += 1
-            tracked = {
-                "device": current_stat.st_dev,
-                "inode": current_stat.st_ino,
-                "offset": 0,
-            }
+            tracked = _new_tracking(current_stat)
             buffer = ""
             (
                 tracked["offset"],
@@ -271,14 +366,15 @@ def wait_for_match(path, regex, boundary, timeout, interval):
             ) = _read_new_data(path, 0, pattern, buffer)
             bytes_read += read_count
             if matched:
-                return {
-                    "matched": True,
-                    "elapsed": time.monotonic() - started,
-                    "bytes_read": bytes_read,
-                    "rotations": rotations,
-                    "truncations": truncations,
-                    **_state_snapshot(path, tracked),
-                }
+                return _matched_result(
+                    path,
+                    tracked,
+                    started,
+                    bytes_read,
+                    rotations,
+                    truncations,
+                )
+            _refresh_anchor(path, tracked)
 
         now = time.monotonic()
         if now >= deadline:
