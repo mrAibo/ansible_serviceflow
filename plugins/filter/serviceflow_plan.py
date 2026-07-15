@@ -8,10 +8,18 @@ from ansible.errors import AnsibleFilterError
 
 _ALLOWED_ACTIONS = ("start", "stop", "restart")
 _ALLOWED_SERVICE_FIELDS = frozenset(
-    {"name", "unit", "groups", "exclude_groups", "manage", "hooks"}
+    {"name", "unit", "groups", "exclude_groups", "manage", "hooks", "ready"}
 )
-_ALLOWED_HOOK_PHASES = ("before_start", "before_stop", "after_stop")
+_ALLOWED_HOOK_PHASES = (
+    "before_start",
+    "before_stop",
+    "after_ready",
+    "after_stop",
+)
 _ALLOWED_HOOK_FIELDS = frozenset({"name", "tasks", "vars"})
+_ALLOWED_READINESS_FIELDS = frozenset(
+    {"type", "active_state", "sub_state", "timeout", "interval"}
+)
 
 
 def _fail(message):
@@ -35,6 +43,12 @@ def _names(value, field):
     if not names:
         _fail(f"{field} must not be empty")
     return [_text(name, f"{field} entry") for name in names]
+
+
+def _positive_integer(value, field):
+    if type(value) is not int or value <= 0:
+        _fail(f"{field} must be a positive integer")
+    return value
 
 
 def _group_members(group_name, inventory_groups, field):
@@ -132,6 +146,46 @@ def _hooks(value, field):
     return normalized
 
 
+def _readiness(value, field):
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        _fail(f"{field} must be a mapping")
+
+    unsupported_fields = sorted(
+        str(key) for key in value if key not in _ALLOWED_READINESS_FIELDS
+    )
+    if unsupported_fields:
+        _fail(
+            f"{field} contains unsupported fields: "
+            + ", ".join(unsupported_fields)
+        )
+
+    readiness_type = _text(value.get("type"), f"{field}.type")
+    if readiness_type != "systemd":
+        _fail(f"{field}.type must be 'systemd'")
+
+    active_state = _text(
+        value.get("active_state", "active"),
+        f"{field}.active_state",
+    )
+    sub_state = value.get("sub_state")
+    if sub_state is not None:
+        sub_state = _text(sub_state, f"{field}.sub_state")
+
+    timeout = _positive_integer(value.get("timeout", 60), f"{field}.timeout")
+    interval = _positive_integer(value.get("interval", 2), f"{field}.interval")
+
+    return {
+        "type": readiness_type,
+        "active_state": active_state,
+        "sub_state": sub_state,
+        "timeout": timeout,
+        "interval": interval,
+        "attempts": max(1, (timeout + interval - 1) // interval),
+    }
+
+
 def _phase(action, services):
     return {"action": action, "services": list(services)}
 
@@ -184,6 +238,9 @@ def serviceflow_plan(services, inventory_groups, action):
             )
         ]
         hooks = _hooks(service.get("hooks"), f"service '{name}'.hooks")
+        readiness = _readiness(service.get("ready"), f"service '{name}'.ready")
+        if hooks.get("after_ready") and readiness is None:
+            _fail(f"service '{name}'.hooks.after_ready requires ready")
 
         manage = service.get("manage", True)
         if type(manage) is not bool:
@@ -203,6 +260,7 @@ def serviceflow_plan(services, inventory_groups, action):
                     inventory_groups,
                 ),
                 "hooks": hooks,
+                "ready": readiness,
             }
         )
 
