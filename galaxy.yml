@@ -19,3 +19,7 @@ issues: https://github.com/mrAibo/ansible_serviceflow/issues
 build_ignore:
   - .gitignore
   - .github
+  - build
+  - collections
+  - acceptance
+  - acceptance_inventory.ini
