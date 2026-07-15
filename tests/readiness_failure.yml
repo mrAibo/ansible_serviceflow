@@ -1,0 +1,29 @@
+---
+- name: Verify readiness failure stops lifecycle progression
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: start
+    serviceflow_services:
+      - name: alpha
+        groups:
+          - alpha
+        unit: serviceflow-alpha.service
+        ready:
+          type: systemd
+          active_state: active
+          sub_state: running
+          timeout: 1
+          interval: 1
+        hooks:
+          after_ready:
+            - name: Record unexpected readiness
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: unexpected-after-ready-alpha
+      - name: beta
+        groups:
+          - beta
+        unit: serviceflow-beta.service
+  roles:
+    - role: mraibo.serviceflow.lifecycle
