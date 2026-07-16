@@ -5,6 +5,12 @@ on:
     tags:
       - "0.1.0"
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (must exist)"
+        required: false
+        default: "0.1.0"
 
 permissions:
   contents: read
@@ -16,8 +22,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Build strictly from the tag ref so the artifact matches the release.
           ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      # When triggered by workflow_dispatch (or if the tag points at a commit
+      # that predates this workflow file), build strictly from the named tag
+      # so the published artifact matches the release commit.
+      - name: Checkout release tag
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || '0.1.0' }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            git fetch --tags --force
+            git checkout "$tag"
+          fi
+          echo "Building from: $(git rev-parse HEAD)"
 
       - uses: actions/setup-python@v5
         with:
