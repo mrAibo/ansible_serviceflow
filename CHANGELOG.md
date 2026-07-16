@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- update README links and status after the 0.1.0 publication;
+- consolidate future GitHub and Galaxy publication into one guarded release workflow;
+- verify role and filter documentation in CI and release builds;
+- document Galaxy account-token scope and rotation across repositories.
+
 ## 0.1.0 - 2026-07-15
 
 ### Added
