@@ -1,6 +1,33 @@
 # Copyright: (c) 2026 Aleksej Voronin
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 
+DOCUMENTATION = r"""
+name: serviceflow_plan
+short_description: Validate the ServiceFlow service list and emit ordered lifecycle phases
+version_added: "0.1.0"
+description:
+  - Validates the complete ServiceFlow configuration before any service changes.
+  - Resolves target hosts from inventory groups with deduplication and exclusions.
+  - Emits deterministic phases (start order, reverse stop order, full restart).
+options:
+  services:
+    description: Ordered service definitions (same shape as serviceflow_services).
+    type: list
+    elements: dict
+    required: true
+  inventory_groups:
+    description: Mapping of inventory group name to its member hosts.
+    type: dict
+    required: true
+  action:
+    description: Lifecycle action to plan.
+    type: str
+    choices: [start, stop, restart]
+    required: true
+author:
+  - Aleksej Voronin
+"""
+
 import os
 import re
 from collections.abc import Mapping, Sequence
