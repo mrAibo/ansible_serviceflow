@@ -146,6 +146,7 @@ For a copyable project layout, inventory, hooks and commands, see [Quick start](
 - [Migration and comparison](docs/MIGRATION_AND_COMPARISON.md)
 - [Architecture and execution model](docs/DESIGN.md)
 - [External acceptance guide](docs/ACCEPTANCE.md)
+- [Release process](docs/RELEASING.md)
 - [Changelog](CHANGELOG.md)
 
 Installed documentation is also available through:
