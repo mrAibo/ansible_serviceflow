@@ -27,7 +27,9 @@ jobs:
           test -s LICENSE
           test -s CHANGELOG.md
           test -s docs/ACCEPTANCE.md
+          test -s roles/lifecycle/README.md
           test -s roles/lifecycle/meta/argument_specs.yml
+          grep -q '^DOCUMENTATION = ' plugins/filter/serviceflow_plan.py
           ! grep -R "see COPYING" plugins
       - name: Planner tests
         run: |
@@ -56,6 +58,7 @@ jobs:
             LICENSE \
             CHANGELOG.md \
             docs/ACCEPTANCE.md \
+            roles/lifecycle/README.md \
             roles/lifecycle/meta/argument_specs.yml; do
             grep -Eq "(^|/)${required}$" "$archive_listing"
           done
@@ -65,6 +68,10 @@ jobs:
             ansible-galaxy collection list mraibo.serviceflow
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-doc -t module mraibo.serviceflow.log_readiness >/dev/null
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-doc -t filter mraibo.serviceflow.serviceflow_plan \
+            > /tmp/serviceflow-filter-doc.txt
+          grep -q serviceflow_plan /tmp/serviceflow-filter-doc.txt
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-doc -t role mraibo.serviceflow.lifecycle \
             > /tmp/serviceflow-role-doc.txt

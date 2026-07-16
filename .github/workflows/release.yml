@@ -47,6 +47,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -s roles/lifecycle/README.md
+          grep -q '^DOCUMENTATION = ' plugins/filter/serviceflow_plan.py
+
           python3 - <<'PY'
           import os
           from pathlib import Path
@@ -96,11 +99,13 @@ jobs:
           archive="build/${{ steps.metadata.outputs.archive_name }}"
           test -f "$archive"
 
-          if tar -tzf "$archive" \
-            | grep -Eq '(^|/)(build|collections|acceptance)(/|$)'; then
+          archive_listing="$(mktemp)"
+          tar -tzf "$archive" > "$archive_listing"
+          if grep -Eq '(^|/)(build|collections|acceptance)(/|$)' "$archive_listing"; then
             echo 'Release archive contains ignored local artifacts' >&2
             exit 1
           fi
+          grep -Eq '(^|/)roles/lifecycle/README.md$' "$archive_listing"
 
           ansible-galaxy collection install "$archive" -p collections
 
@@ -110,6 +115,7 @@ jobs:
           ANSIBLE_NOCOLOR: '1'
         run: |
           ansible-doc -t role mraibo.serviceflow.lifecycle >/dev/null
+          ansible-doc -t filter mraibo.serviceflow.serviceflow_plan >/dev/null
           ansible-doc mraibo.serviceflow.log_readiness >/dev/null
           ansible-playbook -i localhost, -c local tests/planner_smoke.yml
 
@@ -184,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$GALAXY_TOKEN" || {
-            echo 'ANSIBLE_GALAXY_TOKEN is not configured in the galaxy environment' >&2
+            echo 'ANSIBLE_GALAXY_TOKEN is not configured in the galaxy environment or repository secrets' >&2
             exit 1
           }
           python3 -m pip install --disable-pip-version-check -q ansible-core
