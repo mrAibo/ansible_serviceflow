@@ -1,8 +1,11 @@
 # Ansible ServiceFlow
 
+[![CI](https://github.com/mrAibo/ansible_serviceflow/actions/workflows/ci.yml/badge.svg)](https://github.com/mrAibo/ansible_serviceflow/actions/workflows/ci.yml)
+[![Ansible Galaxy](https://img.shields.io/ansible/collection/v/mraibo/serviceflow)](https://galaxy.ansible.com/ui/repo/published/mraibo/serviceflow/)
+
 Ordered, cross-host systemd lifecycle orchestration for Ansible.
 
-> **Status:** Version 0.1.0 passed external acceptance testing and is ready for tagged release and Galaxy publication.
+> **Status:** Version 0.1.0 is published on [Ansible Galaxy](https://galaxy.ansible.com/ui/repo/published/mraibo/serviceflow/) and available as a [GitHub Release](https://github.com/mrAibo/ansible_serviceflow/releases/tag/0.1.0).
 
 ServiceFlow manages application stacks whose services live in different inventory groups and must follow one strict lifecycle order. It complements `ansible.builtin.systemd_service`; it does not replace or reimplement it.
 
@@ -40,7 +43,7 @@ It deliberately does not add another systemd client, dependency framework or app
 
 ## Installation
 
-After Galaxy publication:
+Install the published collection from Ansible Galaxy:
 
 ```bash
 ansible-galaxy collection install mraibo.serviceflow:0.1.0
@@ -153,6 +156,7 @@ Installed documentation is also available through:
 
 ```bash
 ansible-doc -t role mraibo.serviceflow.lifecycle
+ansible-doc -t filter mraibo.serviceflow.serviceflow_plan
 ansible-doc mraibo.serviceflow.log_readiness
 ```
 
