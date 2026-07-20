@@ -6,32 +6,24 @@ After the role completes, `serviceflow_result` contains machine-readable details
 
 ```yaml
 serviceflow_result:
+  schema_version: 1
   action: restart
   check_mode: false
   plan: {}
+  phases: []
   processed: []
   skipped: []
   hooks: []
   readiness: []
 ```
 
-Exact entries depend on the requested action and configured safeguards.
+`plan` is the canonical redacted public plan. `phases` is a redacted compatibility alias retained for the 0.1 release line.
 
-## `action`
+The private execution plan is never stored in `serviceflow_result`. Hook variable names and values are replaced by `has_vars` and `vars_count` metadata.
 
-The validated lifecycle action: `start`, `stop` or `restart`.
+## Processed operations
 
-## `check_mode`
-
-Boolean indicating whether Ansible check mode was active.
-
-## `plan`
-
-The validated global plan, including lifecycle phases and resolved services. It is useful for explaining the sequence before or after execution.
-
-## `processed`
-
-One entry per service host operation. Typical fields:
+One entry is recorded per service and host operation:
 
 ```yaml
 - action: start
@@ -39,41 +31,36 @@ One entry per service host operation. Typical fields:
   unit: example-application.service
   host: app-a.example.invalid
   changed: true
+  predicted_change: true
   transition_needed: true
+  initial_active_state: inactive
+  initial_sub_state: dead
+  desired_active_state: active
+  final_active_state: active
+  final_sub_state: running
   check_mode: false
-  initial_state: inactive
-  active_state: active
 ```
 
-Field meanings:
+In check mode, `final_active_state` and `final_sub_state` are `null`; `predicted_change` and `desired_active_state` describe the predicted operation.
 
-- `action`: operation performed for this phase;
-- `service`: logical service name;
-- `unit`: systemd unit;
-- `host`: resolved inventory host;
-- `changed`: result reported by the systemd operation;
-- `transition_needed`: whether the initial state required an actual transition;
-- `initial_state`: observed state before mutation;
-- `check_mode`: whether this operation was predicted rather than executed;
-- `active_state`: state returned after the operation when available.
+## Skipped definitions
 
-## `skipped`
-
-Configuration-level skips, currently including `manage=false`:
+Configuration-level skips currently include `manage=false`:
 
 ```yaml
 - name: optional-worker
   reason: manage=false
 ```
 
-This is different from readiness being skipped because no start transition occurred.
+This differs from a log readiness check being skipped because no start transition occurred.
 
-## `hooks`
+## Hook results
 
-Executed hooks are recorded with lifecycle context. A typical entry identifies:
+Executed hooks identify both the requested lifecycle action and the concrete phase action:
 
 ```yaml
-- action: restart
+- requested_action: restart
+  phase_action: stop
   phase: before_stop
   service: application
   unit: example-application.service
@@ -83,7 +70,7 @@ Executed hooks are recorded with lifecycle context. A typical entry identifies:
 
 Hooks that do not run because no transition is required are not reported as executed.
 
-## `readiness`
+## Readiness results
 
 ### Systemd readiness
 
@@ -112,7 +99,7 @@ Hooks that do not run because no transition is required are not reported as exec
   truncations: 0
 ```
 
-Log content is not returned. The configured regular expression may appear in the validated plan, but matching application lines are not copied into results.
+Log content is never returned.
 
 ### Skipped log readiness
 
@@ -130,14 +117,11 @@ When a service is already active, no new start boundary exists:
 ## Assertions in consuming playbooks
 
 ```yaml
-- name: Verify that no service was skipped by configuration
+- name: Verify result schema and readiness
   ansible.builtin.assert:
     that:
+      - serviceflow_result.schema_version == 1
       - serviceflow_result.skipped | length == 0
-
-- name: Verify all performed readiness checks matched
-  ansible.builtin.assert:
-    that:
       - >-
         serviceflow_result.readiness
         | rejectattr('skipped', 'defined')
@@ -148,7 +132,7 @@ When a service is already active, no new start boundary exists:
 
 ## Persisting reports
 
-A consuming project may write a redacted JSON report on the controller:
+A consuming project may write the redacted result on the controller:
 
 ```yaml
 - name: Save lifecycle result
@@ -159,4 +143,4 @@ A consuming project may write a redacted JSON report on the controller:
   delegate_to: localhost
 ```
 
-Review the result before storing it in a shared location. Hostnames, unit names and configured paths may be operationally sensitive even though log contents and secrets are not intentionally returned.
+Hostnames, unit names, task paths and configured log paths may still be operationally sensitive even though hook variables and log contents are excluded.
