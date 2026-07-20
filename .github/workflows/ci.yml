@@ -22,7 +22,7 @@ jobs:
             python: "3.12"
             integration: true
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,15 +47,19 @@ jobs:
           test -s roles/lifecycle/README.md
           test -s roles/lifecycle/meta/argument_specs.yml
           grep -q '^DOCUMENTATION = ' plugins/filter/serviceflow_plan.py
+          grep -q '^DOCUMENTATION = ' plugins/filter/serviceflow_features.py
           ! grep -R "see COPYING" plugins
       - name: Python tests
         run: |
           python -m py_compile \
             plugins/filter/serviceflow_plan.py \
+            plugins/filter/serviceflow_features.py \
             plugins/modules/log_readiness.py \
             tests/test_serviceflow_plan.py \
+            tests/test_serviceflow_features.py \
             tests/test_log_readiness.py
           python tests/test_serviceflow_plan.py
+          python tests/test_serviceflow_features.py
           python tests/test_log_readiness.py
       - name: Build and install collection
         shell: bash
@@ -72,6 +76,8 @@ jobs:
             ansible-doc -t module mraibo.serviceflow.log_readiness >/dev/null
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-doc -t filter mraibo.serviceflow.serviceflow_plan >/dev/null
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-doc -t filter mraibo.serviceflow.serviceflow_prepare_features >/dev/null
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-doc -t role mraibo.serviceflow.lifecycle >/dev/null
       - name: Installed planner smoke test
