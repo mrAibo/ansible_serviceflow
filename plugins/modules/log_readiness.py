@@ -342,22 +342,14 @@ def wait_for_match(path, regex, boundary, timeout, interval):
 
         current_stat = _regular_stat(path)
         if current_stat is not None and not _identity_matches(current_stat, tracked):
-            if tracked is not None:
+            was_tracked = tracked is not None
+            if was_tracked:
                 rotations += 1
             tracked = _new_tracking(current_stat)
             buffer = ""
             decoder = _new_decoder()
-            tracked["offset"], buffer, decoder, matched, read_count = _read_new_data(
-                path,
-                0,
-                pattern,
-                buffer,
-                decoder,
-            )
-            bytes_read += read_count
-            if matched:
-                return _matched_result(path, tracked, started, bytes_read, rotations, truncations)
-            _refresh_anchor(path, tracked)
+            if was_tracked:
+                tracked["offset"] = current_stat.st_size
 
         now = time.monotonic()
         if now >= deadline:
