@@ -83,6 +83,7 @@ jobs:
           for playbook in \
             tests/lifecycle.yml \
             tests/hook_failure.yml \
+            tests/missing_hook_preflight.yml \
             tests/readiness_failure.yml \
             tests/log_lifecycle.yml \
             tests/log_readiness_failure.yml; do
@@ -110,6 +111,20 @@ jobs:
           trap 'bash tests/systemd_fixture.sh cleanup' EXIT
 
           bash tests/systemd_fixture.sh setup
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook -i tests/lifecycle_inventory.ini tests/missing_hook_preflight.yml \
+              >/tmp/serviceflow-missing-hook.log 2>&1; then
+            echo 'expected the missing hook preflight playbook to fail' >&2
+            exit 1
+          fi
+          grep -q 'does-not-exist.yml must exist and be a regular file' \
+            /tmp/serviceflow-missing-hook.log
+          ! grep -q 'SUPER_SECRET_PREFLIGHT_MARKER' /tmp/serviceflow-missing-hook.log
+          ! grep -q "object of type 'dict' has no attribute 'path'" \
+            /tmp/serviceflow-missing-hook.log
+          test "$(systemctl is-active serviceflow-alpha.service)" = active
+          test "$(systemctl is-active serviceflow-beta.service)" = active
+
           if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook -i tests/lifecycle_inventory.ini tests/hook_failure.yml; then
             echo 'expected the failing hook playbook to fail' >&2
@@ -169,4 +184,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lifecycle-diagnostics
-          path: /tmp/serviceflow-integration.log
+          path: |
+            /tmp/serviceflow-integration.log
+            /tmp/serviceflow-missing-hook.log
