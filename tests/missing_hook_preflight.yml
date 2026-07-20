@@ -1,0 +1,19 @@
+---
+- name: Verify missing hooks fail before lifecycle changes
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: stop
+    serviceflow_services:
+      - name: alpha
+        groups:
+          - alpha
+        unit: serviceflow-alpha.service
+        hooks:
+          before_stop:
+            - name: Missing secret-bearing hook
+              tasks: hooks/does-not-exist.yml
+              vars:
+                arbitrary_secret_name: SUPER_SECRET_PREFLIGHT_MARKER
+  roles:
+    - role: mraibo.serviceflow.lifecycle
