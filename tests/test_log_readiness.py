@@ -45,18 +45,8 @@ def main():
 
         path.write_text("old data\n", encoding="utf-8")
         boundary = MODULE.capture_boundary(path)
-
-        def truncate():
-            path.write_text("Application ready\n", encoding="utf-8")
-
-        thread = later(truncate)
-        result = MODULE.wait_for_match(
-            str(path),
-            "Application ready",
-            boundary,
-            1,
-            0.01,
-        )
+        thread = later(lambda: path.write_text("Application ready\n", encoding="utf-8"))
+        result = MODULE.wait_for_match(str(path), "Application ready", boundary, 1, 0.01)
         thread.join()
         assert result["matched"]
         assert result["truncations"] == 1
@@ -70,13 +60,7 @@ def main():
             path.write_text("Application ready\n", encoding="utf-8")
 
         thread = later(rotate)
-        result = MODULE.wait_for_match(
-            str(path),
-            "Application ready",
-            boundary,
-            1,
-            0.01,
-        )
+        result = MODULE.wait_for_match(str(path), "Application ready", boundary, 1, 0.01)
         thread.join()
         assert result["matched"]
         assert result["rotations"] == 1
@@ -85,13 +69,7 @@ def main():
         boundary = MODULE.capture_boundary(path)
         assert not boundary["exists"]
         thread = later(lambda: path.write_text("Application ready\n", encoding="utf-8"))
-        result = MODULE.wait_for_match(
-            str(path),
-            "Application ready",
-            boundary,
-            1,
-            0.01,
-        )
+        result = MODULE.wait_for_match(str(path), "Application ready", boundary, 1, 0.01)
         thread.join()
         assert result["matched"]
         assert result["path_exists"]
@@ -99,18 +77,42 @@ def main():
         path.write_text("Application ready\n", encoding="utf-8")
         boundary = MODULE.capture_boundary(path)
         try:
-            MODULE.wait_for_match(
-                str(path),
-                "Application ready",
-                boundary,
-                0.05,
-                0.01,
-            )
+            MODULE.wait_for_match(str(path), "Application ready", boundary, 0.05, 0.01)
         except MODULE.LogReadinessTimeout as error:
             assert not error.result["matched"]
             assert error.result["bytes_read"] == 0
         else:
             raise AssertionError("old matching data satisfied readiness")
+
+        original_stat = MODULE.os.stat
+        MODULE.os.stat = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("capture_boundary must not call path-based os.stat")
+        )
+        try:
+            boundary = MODULE.capture_boundary(path)
+            assert boundary["exists"]
+        finally:
+            MODULE.os.stat = original_stat
+
+        path.write_bytes(b"")
+        boundary = MODULE.capture_boundary(path)
+        original_chunk_size = MODULE._CHUNK_SIZE
+        MODULE._CHUNK_SIZE = 3
+        try:
+            thread = later(
+                lambda: path.write_text("Prefix ✅ Application ready\n", encoding="utf-8")
+            )
+            result = MODULE.wait_for_match(
+                str(path),
+                "✅ Application ready",
+                boundary,
+                1,
+                0.01,
+            )
+            thread.join()
+            assert result["matched"]
+        finally:
+            MODULE._CHUNK_SIZE = original_chunk_size
 
     print("Log readiness tests passed")
 
