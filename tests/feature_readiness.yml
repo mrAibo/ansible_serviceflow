@@ -1,0 +1,104 @@
+---
+- name: Verify port readiness
+  hosts: orchestrator
+  gather_facts: false
+  pre_tasks:
+    - name: Stop HTTP fixture before port readiness
+      ansible.builtin.systemd_service:
+        name: serviceflow-http.service
+        state: stopped
+      become: true
+      delegate_to: alpha
+  vars:
+    serviceflow_action: start
+    serviceflow_services:
+      - name: http-port
+        groups: [alpha]
+        unit: serviceflow-http.service
+        ready:
+          type: port
+          host: 127.0.0.1
+          port: 18080
+          timeout: 10
+          interval: 1
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify port readiness result
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.readiness | length == 1
+          - serviceflow_result.readiness[0].type == 'port'
+          - serviceflow_result.readiness[0].matched | bool
+          - serviceflow_result.readiness[0].port == 18080
+
+- name: Verify HTTP readiness and public redaction
+  hosts: orchestrator
+  gather_facts: false
+  pre_tasks:
+    - name: Stop HTTP fixture before HTTP readiness
+      ansible.builtin.systemd_service:
+        name: serviceflow-http.service
+        state: stopped
+      become: true
+      delegate_to: alpha
+  vars:
+    serviceflow_action: start
+    serviceflow_services:
+      - name: http-health
+        groups: [alpha]
+        unit: serviceflow-http.service
+        ready:
+          type: http
+          url: http://127.0.0.1:18080/health
+          status_code: 200
+          content_regex: '^ready'
+          headers:
+            X-ServiceFlow-Test: secret-marker
+          timeout: 10
+          interval: 1
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify HTTP readiness result and redaction
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.readiness | length == 1
+          - serviceflow_result.readiness[0].type == 'http'
+          - serviceflow_result.readiness[0].matched | bool
+          - serviceflow_result.readiness[0].status == 200
+          - serviceflow_result.plan.phases[0].services[0].ready.has_headers | bool
+          - serviceflow_result.plan.phases[0].services[0].ready.has_auth | bool == false
+          - serviceflow_result.plan | string is not search('secret-marker')
+
+- name: Verify journal readiness
+  hosts: orchestrator
+  gather_facts: false
+  pre_tasks:
+    - name: Stop alpha fixture before journal readiness
+      ansible.builtin.systemd_service:
+        name: serviceflow-alpha.service
+        state: stopped
+      become: true
+      delegate_to: alpha
+  vars:
+    serviceflow_action: start
+    serviceflow_services:
+      - name: alpha-journal
+        groups: [alpha]
+        unit: serviceflow-alpha.service
+        ready:
+          type: journal
+          regex: Journal ready
+          timeout: 10
+          interval: 1
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify journal readiness result
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.readiness | length == 1
+          - serviceflow_result.readiness[0].type == 'journal'
+          - serviceflow_result.readiness[0].matched | bool
+          - serviceflow_result.readiness[0].journal_unit == 'serviceflow-alpha.service'
