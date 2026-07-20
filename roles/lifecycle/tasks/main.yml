@@ -3,10 +3,9 @@
   ansible.builtin.assert:
     that:
       - ansible_play_hosts_all | length == 1
-      - serviceflow_failure_policy in ['fail', 'rollback']
     fail_msg: >-
-      ServiceFlow must run from exactly one orchestration host and
-      serviceflow_failure_policy must be either 'fail' or 'rollback'.
+      ServiceFlow must run from exactly one orchestration host.
+      Target one controller host, commonly localhost.
 
 - name: Build private validated lifecycle plan
   ansible.builtin.set_fact:
@@ -32,14 +31,12 @@
       action: "{{ serviceflow_public_plan.action }}"
       check_mode: "{{ ansible_check_mode | bool }}"
       plan_only: "{{ serviceflow_plan_only | bool }}"
-      failure_policy: "{{ serviceflow_failure_policy }}"
       plan: "{{ serviceflow_public_plan }}"
       phases: "{{ serviceflow_public_plan.phases }}"
       skipped: "{{ serviceflow_public_plan.skipped }}"
       processed: []
       hooks: []
       readiness: []
-      rollback: []
 
 - name: Show redacted lifecycle plan
   ansible.builtin.debug:
