@@ -52,15 +52,22 @@ def main():
         path.write_text("old data\n", encoding="utf-8")
         boundary = MODULE.capture_boundary(path)
         rotated = Path(directory) / "application.log.1"
+        historical_line = "Application ready historical\n"
+        current_line = "Application ready current\n"
 
         def rotate():
             os.rename(path, rotated)
-            path.write_text("Application ready\n", encoding="utf-8")
+            with path.open("wb") as stream:
+                stream.write(historical_line.encode("utf-8"))
+            time.sleep(0.3)
+            with path.open("ab") as stream:
+                stream.write(current_line.encode("utf-8"))
 
         thread = later(rotate)
-        result = MODULE.wait_for_match(str(path), "Application ready", boundary, 1, 0.01)
+        result = MODULE.wait_for_match(str(path), "^Application ready", boundary, 1, 0.01)
         thread.join()
         assert result["matched"]
+        assert result["bytes_read"] == len(current_line.encode("utf-8"))
         assert result["rotations"] == 1
 
         path.unlink()
