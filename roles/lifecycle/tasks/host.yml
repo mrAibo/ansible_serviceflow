@@ -53,6 +53,41 @@
     - serviceflow_transition_needed | bool
     - not ansible_check_mode
 
+- name: Capture journal readiness cursor before start
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - "--unit={{ serviceflow_current_service.ready.unit }}"
+      - --lines=0
+      - --show-cursor
+      - --no-pager
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  check_mode: false
+  changed_when: false
+  register: serviceflow_journal_boundary_result
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'journal'
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
+- name: Store journal readiness cursor
+  ansible.builtin.set_fact:
+    serviceflow_journal_cursor: >-
+      {{
+        (
+          serviceflow_journal_boundary_result.stdout_lines
+          | select('match', '^-- cursor: ')
+          | first
+        )
+        | regex_replace('^-- cursor: ', '')
+      }}
+  when:
+    - serviceflow_journal_boundary_result is defined
+    - serviceflow_journal_boundary_result is not skipped
+
 - name: "{{ serviceflow_phase.action | capitalize }} {{ serviceflow_current_service.unit }} on {{ serviceflow_target_host }}"
   ansible.builtin.systemd_service:
     name: "{{ serviceflow_current_service.unit }}"
@@ -61,6 +96,26 @@
   become: "{{ serviceflow_become }}"
   register: serviceflow_systemd_result
   when: not ansible_check_mode
+
+- name: Track transition changed by this run
+  ansible.builtin.set_fact:
+    _serviceflow_changed_transitions: >-
+      {{
+        _serviceflow_changed_transitions
+        + [
+            {
+              'service': serviceflow_current_service.name,
+              'unit': serviceflow_current_service.unit,
+              'host': serviceflow_target_host,
+              'initial_active_state': serviceflow_initial_active_state,
+              'initial_sub_state': serviceflow_initial_sub_state,
+              'phase_action': serviceflow_phase.action
+            }
+          ]
+      }}
+  when:
+    - not ansible_check_mode
+    - serviceflow_systemd_result.changed | bool
 
 - name: Read final systemd state
   ansible.builtin.command:
@@ -98,6 +153,15 @@
       }}
   when: not ansible_check_mode
 
+- name: Run hooks immediately after start
+  ansible.builtin.include_tasks: hooks.yml
+  vars:
+    serviceflow_hook_phase: after_start
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
 - name: Verify systemd readiness after start
   ansible.builtin.include_tasks: readiness.yml
   when:
@@ -112,6 +176,30 @@
     - serviceflow_phase.action == 'start'
     - serviceflow_current_service.ready is not none
     - serviceflow_current_service.ready.type == 'log'
+    - not ansible_check_mode
+
+- name: Verify port readiness after start
+  ansible.builtin.include_tasks: port_readiness.yml
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'port'
+    - not ansible_check_mode
+
+- name: Verify HTTP readiness after start
+  ansible.builtin.include_tasks: http_readiness.yml
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'http'
+    - not ansible_check_mode
+
+- name: Verify journal readiness after start
+  ansible.builtin.include_tasks: journal_readiness.yml
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'journal'
     - not ansible_check_mode
 
 - name: Run hooks after readiness
