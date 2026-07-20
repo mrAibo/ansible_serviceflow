@@ -1,0 +1,65 @@
+---
+- name: Initialize hook preflight list
+  ansible.builtin.set_fact:
+    _serviceflow_hook_files: []
+
+- name: Collect hook task files
+  ansible.builtin.set_fact:
+    _serviceflow_hook_files: >-
+      {{
+        _serviceflow_hook_files
+        + [
+            {
+              'service': service_item.0.name,
+              'phase': service_item.1.key,
+              'index': hook_index,
+              'path': (
+                hook_item.tasks
+                if hook_item.tasks.startswith('/')
+                else playbook_dir ~ '/' ~ hook_item.tasks
+              )
+            }
+          ]
+      }}
+  loop: >-
+    {{
+      _serviceflow_execution_plan.phases
+      | map(attribute='services')
+      | flatten
+      | unique(attribute='name')
+      | subelements('hooks', skip_missing=True)
+    }}
+  loop_control:
+    loop_var: service_item
+  vars:
+    hook_item: "{{ service_item.1.value[hook_index] }}"
+  with_sequence: start=0 end="{{ service_item.1.value | length - 1 }}"
+  when: service_item.1.value | length > 0
+
+- name: Inspect hook task files on the controller
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  delegate_to: localhost
+  become: false
+  loop: "{{ _serviceflow_hook_files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: _serviceflow_hook_file_stats
+
+- name: Reject missing or non-regular hook task files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: >-
+      ServiceFlow validation failed for service '{{ item.item.service }}'.hooks.{{
+      item.item.phase }}[{{ item.item.index }}]: {{ item.item.path }} must exist
+      and be a regular file on the Ansible controller.
+  loop: "{{ _serviceflow_hook_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Clear hook preflight details
+  ansible.builtin.set_fact:
+    _serviceflow_hook_files: []
+    _serviceflow_hook_file_stats: {}
