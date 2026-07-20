@@ -1,0 +1,68 @@
+---
+- name: Wait for HTTP readiness on {{ serviceflow_target_host }}
+  ansible.builtin.uri:
+    url: "{{ serviceflow_current_service.ready.url }}"
+    method: "{{ serviceflow_current_service.ready.method }}"
+    headers: "{{ serviceflow_current_service.ready.headers }}"
+    url_username: "{{ serviceflow_current_service.ready.user | default(omit, true) }}"
+    url_password: "{{ serviceflow_current_service.ready.password | default(omit, true) }}"
+    force_basic_auth: "{{ serviceflow_current_service.ready.user is not none }}"
+    validate_certs: "{{ serviceflow_current_service.ready.validate_certs }}"
+    return_content: "{{ serviceflow_current_service.ready.content_regex is not none }}"
+    status_code: "{{ serviceflow_current_service.ready.status_code }}"
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  register: serviceflow_http_readiness_result
+  failed_when: false
+  until: >-
+    serviceflow_http_readiness_result.status | default(0)
+    in serviceflow_current_service.ready.status_code
+    and (
+      serviceflow_current_service.ready.content_regex is none
+      or (
+        serviceflow_http_readiness_result.content | default('')
+        is regex(serviceflow_current_service.ready.content_regex)
+      )
+    )
+  retries: "{{ serviceflow_current_service.ready.retries }}"
+  delay: "{{ serviceflow_current_service.ready.interval }}"
+  no_log: true
+
+- name: Require successful HTTP readiness
+  ansible.builtin.assert:
+    that:
+      - >-
+        serviceflow_http_readiness_result.status | default(0)
+        in serviceflow_current_service.ready.status_code
+      - >-
+        serviceflow_current_service.ready.content_regex is none
+        or (
+          serviceflow_http_readiness_result.content | default('')
+          is regex(serviceflow_current_service.ready.content_regex)
+        )
+    fail_msg: >-
+      HTTP readiness failed for {{ serviceflow_current_service.name }} on
+      {{ serviceflow_target_host }}.
+
+- name: Record HTTP readiness
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'readiness': serviceflow_result.readiness
+              + [
+                  {
+                    'type': 'http',
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host,
+                    'matched': true,
+                    'status': serviceflow_http_readiness_result.status,
+                    'attempts': serviceflow_http_readiness_result.attempts | default(1)
+                  }
+                ]
+            }
+          )
+      }}
