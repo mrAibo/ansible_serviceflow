@@ -3,16 +3,22 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "filter" / "serviceflow_features.py"
-SPEC = importlib.util.spec_from_file_location("serviceflow_features", PLUGIN)
-MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
+FEATURE_PLUGIN = ROOT / "plugins" / "filter" / "serviceflow_features.py"
+BASE_PLUGIN = ROOT / "plugins" / "filter" / "serviceflow_plan.py"
+
+FEATURE_SPEC = importlib.util.spec_from_file_location("serviceflow_features", FEATURE_PLUGIN)
+FEATURES = importlib.util.module_from_spec(FEATURE_SPEC)
+FEATURE_SPEC.loader.exec_module(FEATURES)
+
+BASE_SPEC = importlib.util.spec_from_file_location("serviceflow_plan", BASE_PLUGIN)
+BASE = importlib.util.module_from_spec(BASE_SPEC)
+BASE_SPEC.loader.exec_module(BASE)
 
 
 def expect_error(fragment, callback):
     try:
         callback()
-    except MODULE.AnsibleFilterError as error:
+    except FEATURES.AnsibleFilterError as error:
         assert fragment in str(error), str(error)
     else:
         raise AssertionError(f"expected error containing: {fragment}")
@@ -47,7 +53,7 @@ def main():
         }
     ]
 
-    prepared = MODULE.serviceflow_prepare_features(services)
+    prepared = FEATURES.serviceflow_prepare_features(services)
     assert "after_start" not in prepared[0]["hooks"]
     assert prepared[0]["ready"]["type"] == "systemd"
 
@@ -61,7 +67,15 @@ def main():
                         "name": "web",
                         "unit": "web.service",
                         "hosts": ["web01"],
-                        "hooks": {"after_ready": [{"name": "ready", "tasks": "hooks/ready.yml", "vars": {}}]},
+                        "hooks": {
+                            "after_ready": [
+                                {
+                                    "name": "ready",
+                                    "tasks": "hooks/ready.yml",
+                                    "vars": {},
+                                }
+                            ]
+                        },
                         "ready": prepared[0]["ready"],
                     }
                 ],
@@ -69,13 +83,14 @@ def main():
         ],
         "skipped": [],
     }
-    applied = MODULE.serviceflow_apply_features(base_plan, services)
+    applied = FEATURES.serviceflow_apply_features(base_plan, services)
     service = applied["phases"][0]["services"][0]
     assert service["hooks"]["after_start"][0]["name"] == "Warm cache"
     assert service["ready"]["type"] == "http"
     assert service["ready"]["retries"] == 5
 
-    redacted = MODULE.serviceflow_redact_features(applied)
+    public = BASE.serviceflow_public_plan(applied)
+    redacted = FEATURES.serviceflow_redact_features(public)
     ready = redacted["phases"][0]["services"][0]["ready"]
     assert ready["has_headers"] is True
     assert ready["has_auth"] is True
@@ -84,35 +99,81 @@ def main():
     assert "password" not in ready
     assert "SECRET" not in repr(redacted)
 
-    port = MODULE.serviceflow_prepare_features(
-        [{"name": "api", "unit": "api.service", "groups": ["api"], "ready": {"type": "port", "port": 8443}}]
+    port = FEATURES.serviceflow_prepare_features(
+        [
+            {
+                "name": "api",
+                "unit": "api.service",
+                "groups": ["api"],
+                "ready": {"type": "port", "port": 8443},
+            }
+        ]
     )
     assert port[0]["ready"]["type"] == "systemd"
 
-    journal_plan = MODULE.serviceflow_apply_features(
+    journal_plan = FEATURES.serviceflow_apply_features(
         {
             "action": "start",
-            "phases": [{"action": "start", "services": [{"name": "worker", "unit": "worker.service", "hosts": ["worker01"], "hooks": {}, "ready": None}]}],
+            "phases": [
+                {
+                    "action": "start",
+                    "services": [
+                        {
+                            "name": "worker",
+                            "unit": "worker.service",
+                            "hosts": ["worker01"],
+                            "hooks": {},
+                            "ready": None,
+                        }
+                    ],
+                }
+            ],
             "skipped": [],
         },
-        [{"name": "worker", "unit": "worker.service", "groups": ["worker"], "ready": {"type": "journal", "regex": "Worker ready"}}],
+        [
+            {
+                "name": "worker",
+                "unit": "worker.service",
+                "groups": ["worker"],
+                "ready": {"type": "journal", "regex": "Worker ready"},
+            }
+        ],
     )
     assert journal_plan["phases"][0]["services"][0]["ready"]["unit"] == "worker.service"
 
     expect_error(
         "port must not exceed 65535",
-        lambda: MODULE.serviceflow_prepare_features(
-            [{"name": "bad", "unit": "bad.service", "groups": ["bad"], "ready": {"type": "port", "port": 70000}}]
+        lambda: FEATURES.serviceflow_prepare_features(
+            [
+                {
+                    "name": "bad",
+                    "unit": "bad.service",
+                    "groups": ["bad"],
+                    "ready": {"type": "port", "port": 70000},
+                }
+            ]
         ),
     )
     expect_error(
         "interval must not exceed",
-        lambda: MODULE.serviceflow_prepare_features(
-            [{"name": "bad", "unit": "bad.service", "groups": ["bad"], "ready": {"type": "http", "url": "http://localhost", "timeout": 1, "interval": 2}}]
+        lambda: FEATURES.serviceflow_prepare_features(
+            [
+                {
+                    "name": "bad",
+                    "unit": "bad.service",
+                    "groups": ["bad"],
+                    "ready": {
+                        "type": "http",
+                        "url": "http://localhost",
+                        "timeout": 1,
+                        "interval": 2,
+                    },
+                }
+            ]
         ),
     )
 
-    registered = MODULE.FilterModule().filters()
+    registered = FEATURES.FilterModule().filters()
     assert set(registered) == {
         "serviceflow_prepare_features",
         "serviceflow_apply_features",
