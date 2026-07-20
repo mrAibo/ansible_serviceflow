@@ -5,7 +5,7 @@ argument_specs:
     description:
       - Validates and executes ordered start, reverse-order stop, or full restart phases.
       - Resolves service targets from Ansible inventory groups and processes them sequentially.
-      - Supports transition-aware task-file hooks and systemd or new-log-entry readiness.
+      - Supports transition-aware hooks and systemd, log, port, HTTP, or journal readiness.
     options:
       serviceflow_action:
         description: Lifecycle action to execute.
@@ -71,6 +71,11 @@ argument_specs:
                       - Values and names are omitted from public lifecycle plans.
                     type: dict
                     default: {}
+              after_start:
+                description: Task-file hooks executed after a real start and before readiness.
+                type: list
+                elements: dict
+                options: *hook_options
               before_stop:
                 description: Task-file hooks executed before a required stop transition.
                 type: list
@@ -99,6 +104,9 @@ argument_specs:
                 choices:
                   - systemd
                   - log
+                  - port
+                  - http
+                  - journal
               active_state:
                 description: Expected systemd ActiveState for systemd readiness.
                 type: str
@@ -110,7 +118,48 @@ argument_specs:
                 description: Absolute application log path for log readiness.
                 type: path
               regex:
-                description: Regular expression that must match only newly written log data.
+                description: Regular expression for log or journal readiness.
+                type: str
+              host:
+                description: Host address tested from the managed service host for port readiness.
+                type: str
+                default: 127.0.0.1
+              port:
+                description: TCP port required for port readiness.
+                type: int
+              url:
+                description: URL requested for HTTP readiness.
+                type: str
+              method:
+                description: HTTP method used for readiness.
+                type: str
+                default: GET
+              status_code:
+                description: Accepted HTTP status code or list of codes.
+                type: raw
+                default:
+                  - 200
+              content_regex:
+                description: Optional expression that must match the HTTP response body.
+                type: str
+              headers:
+                description:
+                  - Optional HTTP headers.
+                  - Header names and values are removed from the public plan.
+                type: dict
+                default: {}
+              user:
+                description: Optional HTTP username omitted from public results.
+                type: str
+              password:
+                description: Optional HTTP password omitted from public results.
+                type: str
+              validate_certs:
+                description: Validate TLS certificates for HTTP readiness.
+                type: bool
+                default: true
+              unit:
+                description: Optional journal unit override; defaults to the managed unit.
                 type: str
               timeout:
                 description: Maximum readiness wait in seconds.
@@ -119,16 +168,31 @@ argument_specs:
               interval:
                 description:
                   - Polling interval in seconds.
-                  - Defaults to 2 for systemd readiness and 1 for log readiness.
+                  - Defaults to 2 for systemd readiness and 1 for other readiness types.
                   - Must not exceed timeout.
                 type: int
       serviceflow_become:
-        description: Use privilege escalation for service, hook, and readiness operations.
+        description: Use privilege escalation for service, hook, readiness, and rollback operations.
         type: bool
         default: true
       serviceflow_show_plan:
         description:
           - Display the redacted public lifecycle plan.
-          - Hook variable names and values are never included.
+          - Hook variables and HTTP credentials or headers are never included.
         type: bool
         default: false
+      serviceflow_plan_only:
+        description:
+          - Validate configuration and hook files, expose the redacted plan, and perform no lifecycle operations.
+          - This is independent of Ansible check mode.
+        type: bool
+        default: false
+      serviceflow_failure_policy:
+        description:
+          - Failure behavior after a lifecycle operation fails.
+          - Rollback restores only transitions changed by the current run, in reverse order.
+        type: str
+        choices:
+          - fail
+          - rollback
+        default: fail
