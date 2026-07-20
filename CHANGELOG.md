@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-20
+
+### Added
+
+- `after_start` hooks executed after a real start transition and before readiness;
+- TCP port readiness through `ansible.builtin.wait_for`;
+- HTTP readiness with status-code and optional response-content checks;
+- journal readiness based on a cursor captured before the current start;
+- explicit `serviceflow_plan_only` validation and redacted planning mode;
+- optional transition-scoped rollback through `serviceflow_failure_policy: rollback`;
+- schema version 2 with plan-only, failure-policy and rollback result fields.
+
+### Security
+
+- redact HTTP headers, usernames and passwords from public plans;
+- run HTTP readiness with `no_log` and return only status and attempt metadata;
+- keep rollback limited to transitions actually changed by the current run.
+
+### Changed
+
+- retain the stable 0.1 planner and layer new feature validation around it;
+- increase the CI timeout for sanity and full systemd integration coverage.
+
 ## 0.1.1 - 2026-07-20
 
 ### Security
@@ -47,8 +70,6 @@ All notable changes to this project are documented in this file.
 
 ### Deferred
 
-- automatic rollback;
 - arbitrary dependency graphs;
 - parallel or rolling execution;
-- port and HTTP readiness;
 - non-systemd service managers.
