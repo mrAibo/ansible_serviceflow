@@ -1,0 +1,35 @@
+---
+- name: Verify explicit plan-only mode
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: start
+    serviceflow_plan_only: true
+    serviceflow_services:
+      - name: alpha
+        groups: [alpha]
+        unit: serviceflow-alpha.service
+        hooks:
+          after_start:
+            - name: Validate after-start hook file
+              tasks: hooks/record.yml
+              vars:
+                hook_marker: must-not-run
+        ready:
+          type: journal
+          regex: Journal ready
+          timeout: 5
+          interval: 1
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify plan-only result
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.schema_version == 2
+          - serviceflow_result.plan_only | bool
+          - serviceflow_result.processed == []
+          - serviceflow_result.hooks == []
+          - serviceflow_result.readiness == []
+          - serviceflow_result.rollback == []
+          - serviceflow_result.plan.phases[0].services[0].ready.type == 'journal'
