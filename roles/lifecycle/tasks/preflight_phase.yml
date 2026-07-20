@@ -1,4 +1,8 @@
 ---
+- name: Reset sanitized hook preflight results
+  ansible.builtin.set_fact:
+    serviceflow_preflight_files: []
+
 - name: Inspect hook task files for {{ serviceflow_preflight_service.name }}
   ansible.builtin.stat:
     path: >-
@@ -14,16 +18,40 @@
     index_var: serviceflow_preflight_index
     label: "{{ item.tasks }}"
   register: serviceflow_preflight_stats
+  no_log: true
+
+- name: Build sanitized hook preflight results
+  ansible.builtin.set_fact:
+    serviceflow_preflight_files: >-
+      {{
+        serviceflow_preflight_files
+        + [
+          {
+            'index': item.serviceflow_preflight_index,
+            'path': (
+              item.item.tasks
+              if item.item.tasks.startswith('/')
+              else playbook_dir ~ '/' ~ item.item.tasks
+            ),
+            'exists': item.stat.exists | default(false),
+            'isreg': item.stat.isreg | default(false)
+          }
+        ]
+      }}
+  loop: "{{ serviceflow_preflight_stats.results }}"
+  loop_control:
+    label: "{{ item.item.tasks }}"
+  no_log: true
 
 - name: Reject invalid hook task files for {{ serviceflow_preflight_service.name }}
   ansible.builtin.assert:
     that:
-      - item.stat.exists
-      - item.stat.isreg
+      - item.exists
+      - item.isreg
     fail_msg: >-
       ServiceFlow validation failed for service '{{ serviceflow_preflight_service.name }}'.hooks.{{
-      serviceflow_preflight_phase.key }}[{{ item.serviceflow_preflight_index }}]:
-      {{ item.stat.path }} must exist and be a regular file on the Ansible controller.
-  loop: "{{ serviceflow_preflight_stats.results }}"
+      serviceflow_preflight_phase.key }}[{{ item.index }}]:
+      {{ item.path }} must exist and be a regular file on the Ansible controller.
+  loop: "{{ serviceflow_preflight_files }}"
   loop_control:
-    label: "{{ item.stat.path }}"
+    label: "{{ item.path }}"
