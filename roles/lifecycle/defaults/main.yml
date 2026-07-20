@@ -4,4 +4,3 @@ serviceflow_services: []
 serviceflow_become: true
 serviceflow_show_plan: false
 serviceflow_plan_only: false
-serviceflow_failure_policy: fail
