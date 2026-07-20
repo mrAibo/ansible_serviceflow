@@ -66,7 +66,9 @@ argument_specs:
                     type: path
                     required: true
                   vars:
-                    description: Values exposed to the task file as serviceflow_hook_vars.
+                    description:
+                      - Values exposed to the task file as serviceflow_hook_vars.
+                      - Values and names are omitted from public lifecycle plans.
                     type: dict
                     default: {}
               before_stop:
@@ -115,10 +117,18 @@ argument_specs:
                 type: int
                 default: 60
               interval:
-                description: Delay between readiness attempts in seconds.
+                description:
+                  - Polling interval in seconds.
+                  - Defaults to 2 for systemd readiness and 1 for log readiness.
+                  - Must not exceed timeout.
                 type: int
-                default: 2
       serviceflow_become:
         description: Use privilege escalation for service, hook, and readiness operations.
         type: bool
         default: true
+      serviceflow_show_plan:
+        description:
+          - Display the redacted public lifecycle plan.
+          - Hook variable names and values are never included.
+        type: bool
+        default: false
