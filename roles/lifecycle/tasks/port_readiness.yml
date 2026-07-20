@@ -1,0 +1,35 @@
+---
+- name: Wait for port readiness on {{ serviceflow_target_host }}
+  ansible.builtin.wait_for:
+    host: "{{ serviceflow_current_service.ready.host }}"
+    port: "{{ serviceflow_current_service.ready.port }}"
+    state: started
+    timeout: "{{ serviceflow_current_service.ready.timeout }}"
+    sleep: "{{ serviceflow_current_service.ready.interval }}"
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  register: serviceflow_port_readiness_result
+
+- name: Record port readiness
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'readiness': serviceflow_result.readiness
+              + [
+                  {
+                    'type': 'port',
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host,
+                    'matched': true,
+                    'connect_host': serviceflow_current_service.ready.host,
+                    'port': serviceflow_current_service.ready.port,
+                    'elapsed': serviceflow_port_readiness_result.elapsed | default(0)
+                  }
+                ]
+            }
+          )
+      }}
