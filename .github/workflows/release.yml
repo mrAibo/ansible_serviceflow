@@ -90,6 +90,26 @@ jobs:
           )
           PY
 
+      - name: Run Python regression tests
+        run: |
+          python3 -m py_compile \
+            plugins/filter/serviceflow_plan.py \
+            plugins/modules/log_readiness.py \
+            tests/test_serviceflow_plan.py \
+            tests/test_log_readiness.py
+          python3 tests/test_serviceflow_plan.py
+          python3 tests/test_log_readiness.py
+
+      - name: Run Ansible sanity tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)/ansible_collections/mraibo/serviceflow"
+          mkdir -p "$root"
+          cp -a . "$root/"
+          cd "$root"
+          ansible-test sanity --color no
+
       - name: Build collection
         shell: bash
         run: |
