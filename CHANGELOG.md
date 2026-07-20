@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.1 - 2026-07-21
+
+### Added
+
+- add comprehensive usage examples for common lifecycle, hook and readiness patterns.
+
+### Fixed
+
+- update release status and installation examples for 0.2.1.
+
 ## 0.2.0 - 2026-07-20
 
 ### Added
