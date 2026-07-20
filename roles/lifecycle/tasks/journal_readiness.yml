@@ -1,0 +1,50 @@
+---
+- name: Wait for journal readiness on {{ serviceflow_target_host }}
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - "--unit={{ serviceflow_current_service.ready.unit }}"
+      - "--after-cursor={{ serviceflow_journal_cursor }}"
+      - "--grep={{ serviceflow_current_service.ready.regex }}"
+      - --quiet
+      - --no-pager
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  register: serviceflow_journal_readiness_result
+  until: serviceflow_journal_readiness_result.rc == 0
+  retries: "{{ serviceflow_current_service.ready.retries }}"
+  delay: "{{ serviceflow_current_service.ready.interval }}"
+
+- name: Require successful journal readiness
+  ansible.builtin.assert:
+    that:
+      - serviceflow_journal_readiness_result.rc == 0
+    fail_msg: >-
+      Journal readiness failed for {{ serviceflow_current_service.name }} on
+      {{ serviceflow_target_host }}.
+
+- name: Record journal readiness
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'readiness': serviceflow_result.readiness
+              + [
+                  {
+                    'type': 'journal',
+                    'service': serviceflow_current_service.name,
+                    'unit': serviceflow_current_service.unit,
+                    'host': serviceflow_target_host,
+                    'matched': true,
+                    'journal_unit': serviceflow_current_service.ready.unit,
+                    'attempts': serviceflow_journal_readiness_result.attempts | default(1)
+                  }
+                ]
+            }
+          )
+      }}
