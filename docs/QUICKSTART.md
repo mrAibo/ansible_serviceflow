@@ -25,7 +25,7 @@ example-project/
 ---
 collections:
   - name: mraibo.serviceflow
-    version: "0.2.1"
+    version: "0.2.2"
 ```
 
 ```bash
@@ -187,7 +187,7 @@ ansible-playbook -i inventory.ini lifecycle.yml -e requested_action=restart
 
 ## 8. Recommended first production use
 
-1. Pin version `0.2.1` in `requirements.yml`.
+1. Pin version `0.2.2` in `requirements.yml`.
 2. Run `--syntax-check`.
 3. Run `--check` against the target inventory.
 4. Test with non-production units or a maintenance environment.

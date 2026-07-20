@@ -5,7 +5,7 @@
 
 Ordered, cross-host systemd lifecycle orchestration for Ansible.
 
-> **Current release:** 0.2.1. It includes the 0.1.1 lifecycle fixes, concise service input forms and expanded usage examples.
+> **Current release:** 0.2.2. It prevents historical data in a replacement log inode from satisfying current-start readiness.
 
 ServiceFlow manages application stacks whose services live in different inventory groups and must follow one strict lifecycle order. It complements `ansible.builtin.systemd_service`; it does not replace or reimplement it.
 
@@ -29,7 +29,7 @@ Start follows the declared order. Stop uses the exact reverse order. Restart per
 Install the current release:
 
 ```bash
-ansible-galaxy collection install mraibo.serviceflow:0.2.1
+ansible-galaxy collection install mraibo.serviceflow:0.2.2
 ```
 
 Recommended `requirements.yml`:
@@ -38,7 +38,7 @@ Recommended `requirements.yml`:
 ---
 collections:
   - name: mraibo.serviceflow
-    version: "0.2.1"
+    version: "0.2.2"
 ```
 
 Requirements:

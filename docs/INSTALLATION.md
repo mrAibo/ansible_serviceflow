@@ -22,7 +22,7 @@ ansible-galaxy collection install mraibo.serviceflow
 Install an exact version for reproducible automation:
 
 ```bash
-ansible-galaxy collection install mraibo.serviceflow:0.2.1
+ansible-galaxy collection install mraibo.serviceflow:0.2.2
 ```
 
 ## Install with `requirements.yml`
@@ -31,7 +31,7 @@ ansible-galaxy collection install mraibo.serviceflow:0.2.1
 ---
 collections:
   - name: mraibo.serviceflow
-    version: "0.2.1"
+    version: "0.2.2"
 ```
 
 ```bash
@@ -49,7 +49,7 @@ Before Galaxy publication, or when testing a repository tag:
 collections:
   - name: https://github.com/mrAibo/ansible_serviceflow.git
     type: git
-    version: "0.2.1"
+    version: "0.2.2"
 ```
 
 ## Install a locally built artifact
@@ -57,12 +57,12 @@ collections:
 ```bash
 git clone https://github.com/mrAibo/ansible_serviceflow.git
 cd ansible_serviceflow
-git switch --detach 0.2.1
+git switch --detach 0.2.2
 
 mkdir -p build
 ansible-galaxy collection build --output-path build
 ansible-galaxy collection install \
-  build/mraibo-serviceflow-0.2.1.tar.gz \
+  build/mraibo-serviceflow-0.2.2.tar.gz \
   --force
 ```
 
