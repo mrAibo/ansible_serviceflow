@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-20
+
+### Added
+
+- allow `name` to be omitted and derive it by removing only a final `.service` suffix from `unit`;
+- allow `groups` and `exclude_groups` to use either one string or a list of strings.
+
+### Changed
+
+- keep readiness definitions as dictionaries and retain the existing lifecycle and result schema;
+- document the concise service input form without adding automatic service or inventory discovery.
+
 ## 0.1.1 - 2026-07-20
 
 ### Security

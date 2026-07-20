@@ -24,22 +24,24 @@ argument_specs:
         required: true
         options:
           name:
-            description: Unique logical service name used in results and hook context.
+            description:
+              - Optional unique logical service name used in results and hook context.
+              - When omitted, the final .service suffix is removed from unit.
             type: str
-            required: true
           unit:
             description: systemd unit name managed through ansible.builtin.systemd_service.
             type: str
             required: true
           groups:
             description:
-              - Inventory groups whose hosts run the unit.
+              - Inventory group or list of groups whose hosts run the unit.
               - Hosts from all groups are merged and deduplicated in stable order.
             type: list
             elements: str
             required: true
           exclude_groups:
-            description: Inventory groups whose hosts are removed after positive group resolution.
+            description:
+              - Inventory group or list of groups removed after positive group resolution.
             type: list
             elements: str
             default: []

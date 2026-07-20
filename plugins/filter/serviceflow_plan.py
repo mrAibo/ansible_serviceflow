@@ -6,7 +6,7 @@ name: serviceflow_plan
 short_description: Validate the ServiceFlow service list and emit ordered lifecycle phases
 version_added: "0.1.0"
 description:
-  - Validates the complete ServiceFlow configuration before any service changes.
+  - Validates and normalizes the complete ServiceFlow configuration before changes.
   - Resolves target hosts from inventory groups with deduplication and exclusions.
   - Emits deterministic phases for ordered start, reverse stop, or full restart.
 options:
@@ -70,9 +70,12 @@ def _sequence(value, field):
     return list(value)
 
 
-def _names(value, field):
-    names = _sequence(value, field)
-    if not names:
+def _names(value, field, allow_empty=False):
+    if isinstance(value, str):
+        names = [value]
+    else:
+        names = _sequence(value, field)
+    if not names and not allow_empty:
         _fail(f"{field} must not be empty")
     return [_text(name, f"{field} entry") for name in names]
 
@@ -86,7 +89,6 @@ def _positive_integer(value, field):
 def _group_members(group_name, inventory_groups, field):
     if group_name not in inventory_groups:
         _fail(f"{field} references missing inventory group '{group_name}'")
-
     members = _sequence(
         inventory_groups[group_name],
         f"inventory group '{group_name}'",
@@ -100,7 +102,6 @@ def _group_members(group_name, inventory_groups, field):
 def _resolve_hosts(service_name, group_names, exclude_group_names, inventory_groups):
     hosts = []
     seen = set()
-
     for group_name in group_names:
         members = _group_members(
             group_name,
@@ -174,7 +175,6 @@ def _hooks(value, field):
                     "vars": dict(variables),
                 }
             )
-
     return normalized
 
 
@@ -186,7 +186,6 @@ def _unsupported_readiness_fields(value, allowed, field):
 
 def _systemd_readiness(value, field, timeout, interval):
     _unsupported_readiness_fields(value, _SYSTEMD_READINESS_FIELDS, field)
-
     active_state = _text(
         value.get("active_state", "active"),
         f"{field}.active_state",
@@ -194,7 +193,6 @@ def _systemd_readiness(value, field, timeout, interval):
     sub_state = value.get("sub_state")
     if sub_state is not None:
         sub_state = _text(sub_state, f"{field}.sub_state")
-
     return {
         "type": "systemd",
         "active_state": active_state,
@@ -207,17 +205,14 @@ def _systemd_readiness(value, field, timeout, interval):
 
 def _log_readiness(value, field, timeout, interval):
     _unsupported_readiness_fields(value, _LOG_READINESS_FIELDS, field)
-
     path = _text(value.get("path"), f"{field}.path")
     if not os.path.isabs(path):
         _fail(f"{field}.path must be absolute")
-
     regex = _text(value.get("regex"), f"{field}.regex")
     try:
         re.compile(regex, re.MULTILINE)
     except re.error as error:
         _fail(f"{field}.regex is invalid: {error}")
-
     return {
         "type": "log",
         "path": path,
@@ -281,7 +276,6 @@ def _public_service(service):
 
 def serviceflow_public_plan(plan):
     """Return a plan safe for output and persistence."""
-
     if not isinstance(plan, Mapping):
         _fail("execution plan must be a mapping")
     return {
@@ -299,7 +293,6 @@ def serviceflow_public_plan(plan):
 
 def serviceflow_plan(services, inventory_groups, action):
     """Validate configuration and return deterministic lifecycle phases."""
-
     action = _text(action, "serviceflow_action")
     if action not in _ALLOWED_ACTIONS:
         allowed = ", ".join(_ALLOWED_ACTIONS)
@@ -327,24 +320,26 @@ def serviceflow_plan(services, inventory_groups, action):
         if unsupported:
             _fail(f"{field} contains unsupported fields: {', '.join(unsupported)}")
 
-        name = _text(service.get("name"), f"{field}.name")
+        unit = _text(service.get("unit"), f"{field}.unit")
+        raw_name = service.get("name")
+        name = (
+            _text(raw_name, f"{field}.name")
+            if raw_name is not None
+            else unit.removesuffix(".service")
+        )
         if name in service_names:
             _fail(f"duplicate service name '{name}'")
         service_names.add(name)
 
-        unit = _text(service.get("unit"), f"service '{name}'.unit")
         if any(character.isspace() for character in unit):
             _fail(f"service '{name}'.unit must not contain whitespace")
 
         group_names = _names(service.get("groups"), f"service '{name}'.groups")
-        exclude_group_names = service.get("exclude_groups", [])
-        exclude_group_names = [
-            _text(group, f"service '{name}'.exclude_groups entry")
-            for group in _sequence(
-                exclude_group_names,
-                f"service '{name}'.exclude_groups",
-            )
-        ]
+        exclude_group_names = _names(
+            service.get("exclude_groups", []),
+            f"service '{name}'.exclude_groups",
+            allow_empty=True,
+        )
         hooks = _hooks(service.get("hooks"), f"service '{name}'.hooks")
         readiness = _readiness(service.get("ready"), f"service '{name}'.ready")
         if hooks.get("after_ready") and readiness is None:
