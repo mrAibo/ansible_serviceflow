@@ -22,7 +22,7 @@ jobs:
             python: "3.12"
             integration: true
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -91,7 +91,9 @@ jobs:
             tests/hook_failure.yml \
             tests/readiness_failure.yml \
             tests/log_lifecycle.yml \
-            tests/log_readiness_failure.yml; do
+            tests/log_readiness_failure.yml \
+            tests/feature_readiness.yml \
+            tests/plan_only.yml; do
             ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
               ansible-playbook --syntax-check \
                 -i tests/lifecycle_inventory.ini \
@@ -147,6 +149,14 @@ jobs:
               -e requested_action=start
 
           bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/plan_only.yml
+          test "$(systemctl is-active serviceflow-alpha.service || true)" = inactive
+          test ! -s /tmp/serviceflow-order.log
+
+          bash tests/systemd_fixture.sh reset
           if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
@@ -154,6 +164,18 @@ jobs:
             echo 'expected the systemd readiness playbook to fail' >&2
             exit 1
           fi
+
+          bash tests/systemd_fixture.sh reset
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/readiness_failure.yml \
+              -e serviceflow_failure_policy=rollback; then
+            echo 'expected rollback readiness playbook to report the original failure' >&2
+            exit 1
+          fi
+          test "$(systemctl is-active serviceflow-alpha.service || true)" = inactive
+          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
 
           bash tests/systemd_fixture.sh reset
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
@@ -170,6 +192,12 @@ jobs:
             echo 'expected old-only log readiness to fail' >&2
             exit 1
           fi
+
+          bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/feature_readiness.yml
       - name: Upload lifecycle diagnostics
         if: failure() && matrix.integration
         uses: actions/upload-artifact@v4
