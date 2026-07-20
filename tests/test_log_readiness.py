@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import importlib.util
 import os
 from pathlib import Path
@@ -84,10 +82,11 @@ def main():
         else:
             raise AssertionError("old matching data satisfied readiness")
 
+        def fail_path_stat(*_args, **_kwargs):
+            raise AssertionError("capture_boundary must not call path-based os.stat")
+
         original_stat = MODULE.os.stat
-        MODULE.os.stat = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("capture_boundary must not call path-based os.stat")
-        )
+        MODULE.os.stat = fail_path_stat
         try:
             boundary = MODULE.capture_boundary(path)
             assert boundary["exists"]
