@@ -3,16 +3,19 @@
   ansible.builtin.assert:
     that:
       - ansible_play_hosts_all | length == 1
+      - serviceflow_failure_policy in ['fail', 'rollback']
     fail_msg: >-
-      ServiceFlow must run from exactly one orchestration host.
-      Target one controller host, commonly localhost.
+      ServiceFlow must run from exactly one orchestration host and
+      serviceflow_failure_policy must be either 'fail' or 'rollback'.
 
 - name: Build private validated lifecycle plan
   ansible.builtin.set_fact:
     _serviceflow_execution_plan: >-
       {{
         serviceflow_services
+        | mraibo.serviceflow.serviceflow_prepare_features
         | mraibo.serviceflow.serviceflow_plan(groups, serviceflow_action)
+        | mraibo.serviceflow.serviceflow_apply_features(serviceflow_services)
       }}
   no_log: true
 
@@ -22,21 +25,25 @@
       {{
         _serviceflow_execution_plan
         | mraibo.serviceflow.serviceflow_public_plan
+        | mraibo.serviceflow.serviceflow_redact_features
       }}
 
 - name: Initialize lifecycle result
   ansible.builtin.set_fact:
+    _serviceflow_changed_transitions: []
     serviceflow_result:
-      schema_version: 1
+      schema_version: 2
       action: "{{ serviceflow_public_plan.action }}"
       check_mode: "{{ ansible_check_mode | bool }}"
       plan_only: "{{ serviceflow_plan_only | bool }}"
+      failure_policy: "{{ serviceflow_failure_policy }}"
       plan: "{{ serviceflow_public_plan }}"
       phases: "{{ serviceflow_public_plan.phases }}"
       skipped: "{{ serviceflow_public_plan.skipped }}"
       processed: []
       hooks: []
       readiness: []
+      rollback: []
 
 - name: Show redacted lifecycle plan
   ansible.builtin.debug:
@@ -44,20 +51,38 @@
   when:
     - serviceflow_show_plan | bool or serviceflow_plan_only | bool
 
-- name: Preflight hook task files
-  ansible.builtin.include_tasks: preflight.yml
-
-- name: Execute lifecycle safely
+- name: Validate and execute lifecycle
   block:
+    - name: Preflight hook task files
+      ansible.builtin.include_tasks: preflight.yml
+
     - name: Execute lifecycle phases
       ansible.builtin.include_tasks: phase.yml
       loop: "{{ _serviceflow_execution_plan.phases }}"
       loop_control:
         loop_var: serviceflow_phase
         label: "{{ serviceflow_phase.action }}"
-  when: not serviceflow_plan_only | bool
+      when: not serviceflow_plan_only | bool
+  rescue:
+    - name: Restore transitions changed by this run
+      ansible.builtin.include_tasks: rollback.yml
+      loop: "{{ _serviceflow_changed_transitions | reverse | list }}"
+      loop_control:
+        loop_var: serviceflow_rollback_item
+        label: >-
+          {{ serviceflow_rollback_item.unit }} on {{ serviceflow_rollback_item.host }}
+      when:
+        - serviceflow_failure_policy == 'rollback'
+        - not ansible_check_mode
+        - _serviceflow_changed_transitions | length > 0
+
+    - name: Report lifecycle failure
+      ansible.builtin.fail:
+        msg: >-
+          ServiceFlow lifecycle failed: {{ ansible_failed_result.msg | default(ansible_failed_result) }}
   always:
-    - name: Clear private lifecycle plan
+    - name: Clear private lifecycle data
       ansible.builtin.set_fact:
         _serviceflow_execution_plan: {}
+        _serviceflow_changed_transitions: []
       no_log: true
