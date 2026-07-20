@@ -130,6 +130,7 @@ serviceflow_result:
 
 - [Installation and compatibility](docs/INSTALLATION.md)
 - [Quick start](docs/QUICKSTART.md)
+- [Comprehensive usage examples](docs/EXAMPLES.md)
 - [Complete configuration reference](docs/REFERENCE.md)
 - [Lifecycle hooks](docs/HOOKS.md)
 - [Structured results](docs/RESULTS.md)
