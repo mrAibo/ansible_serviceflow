@@ -42,11 +42,11 @@
     var: serviceflow_public_plan
   when: serviceflow_show_plan | bool
 
-- name: Preflight hook task files
-  ansible.builtin.include_tasks: preflight.yml
-
-- name: Execute lifecycle safely
+- name: Validate and execute lifecycle safely
   block:
+    - name: Preflight hook task files
+      ansible.builtin.include_tasks: preflight.yml
+
     - name: Execute lifecycle phases
       ansible.builtin.include_tasks: phase.yml
       loop: "{{ _serviceflow_execution_plan.phases }}"
