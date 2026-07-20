@@ -41,9 +41,9 @@
       - item.stat.exists
       - item.stat.isreg
     fail_msg: >-
-      Hook file {{ item.item.tasks }} for
-      {{ item.item.service }}:{{ item.item.phase }}[{{ item.item.index }}]
-      must exist and be a regular file on the Ansible controller.
+      Hook file {{ item.item.tasks }} must exist and be a regular file on the
+      Ansible controller for
+      {{ item.item.service }}:{{ item.item.phase }}[{{ item.item.index }}].
   loop: "{{ serviceflow_preflight_stats.results }}"
   loop_control:
     label: "{{ item.item.tasks }}"
