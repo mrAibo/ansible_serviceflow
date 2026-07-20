@@ -1,0 +1,21 @@
+name: Python tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check -q ansible-core
+      - name: Planner test
+        run: python tests/test_serviceflow_plan.py
+      - name: Log readiness test
+        run: python tests/test_log_readiness.py
