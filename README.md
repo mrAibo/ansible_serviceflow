@@ -5,7 +5,7 @@
 
 Ordered, cross-host systemd lifecycle orchestration for Ansible.
 
-> **Status:** Version 0.1.0 is published. Version 0.1.1 is the current bug-fix candidate for lifecycle safety, result correctness and plan redaction.
+> **Status:** Version 0.1.0 is published. Version 0.1.1 is the current bug-fix candidate; version 0.2.0 adds only concise service input forms.
 
 ServiceFlow manages application stacks whose services live in different inventory groups and must follow one strict lifecycle order. It complements `ansible.builtin.systemd_service`; it does not replace or reimplement it.
 
@@ -59,17 +59,12 @@ Requirements:
   vars:
     serviceflow_action: "{{ requested_action | default('restart') }}"
     serviceflow_services:
-      - name: database
-        groups: [database]
-        unit: example-database.service
-        ready:
-          type: systemd
-          active_state: active
-          sub_state: running
+      - unit: example-database.service
+        groups: database
+        ready: {type: systemd}
 
-      - name: application
-        groups: [application]
-        unit: example-application.service
+      - unit: example-application.service
+        groups: application
         hooks:
           before_stop:
             - name: Prepare graceful shutdown
@@ -81,13 +76,15 @@ Requirements:
           timeout: 120
           interval: 1
 
-      - name: frontend
-        groups: [frontend, edge]
-        exclude_groups: [maintenance]
+      - name: public-frontend
         unit: example-frontend.service
+        groups: [frontend, edge]
+        exclude_groups: maintenance
   roles:
     - role: mraibo.serviceflow.lifecycle
 ```
+
+When `name` is omitted, ServiceFlow derives it from `unit` by removing only a final `.service` suffix. An explicit name always wins. `groups` and `exclude_groups` accept either one string or a list. Readiness remains a dictionary; the YAML short form `ready: {type: systemd}` is supported without weakening validation.
 
 ## Key behavior
 
@@ -108,11 +105,11 @@ Requirements:
 - Public plans omit hook variable names and values.
 - Plan output is disabled by default and may be enabled with `serviceflow_show_plan: true`.
 - The lifecycle stops on the first validation, hook, service or readiness failure.
-- Automatic rollback is not provided in the 0.1 release line.
+- Automatic rollback is not provided.
 
 ## Result schema
 
-Version 0.1.1 returns:
+Version 0.2.0 retains schema version 1:
 
 ```yaml
 serviceflow_result:
@@ -156,14 +153,7 @@ ansible-doc mraibo.serviceflow.log_readiness
 - arbitrary dependency graphs;
 - parallel or rolling execution;
 - automatic rollback;
-- HTTP and port readiness;
+- HTTP, port and journal readiness;
+- `after_start` hooks;
+- plan-only mode;
 - non-systemd service managers;
-- container and Kubernetes lifecycle management.
-
-## Security
-
-Application hooks are trusted code owned by the consuming project. Keep secrets in Ansible Vault or an approved secret backend and use `no_log` for sensitive operations. Hook variables are available to the private execution path but are not included in the public plan or result.
-
-## License
-
-GPL-3.0-or-later. See [LICENSE](LICENSE).

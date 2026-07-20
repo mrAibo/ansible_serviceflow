@@ -54,8 +54,10 @@ jobs:
             plugins/filter/serviceflow_plan.py \
             plugins/modules/log_readiness.py \
             tests/test_serviceflow_plan.py \
+            tests/test_serviceflow_input_normalization.py \
             tests/test_log_readiness.py
           python tests/test_serviceflow_plan.py
+          python tests/test_serviceflow_input_normalization.py
           python tests/test_log_readiness.py
       - name: Build and install collection
         shell: bash

@@ -34,7 +34,30 @@
               )
           }}
 
-    - name: Verify phases, order and host deduplication
+    - name: Build concise start plan
+      ansible.builtin.set_fact:
+        concise_result: >-
+          {{
+            [
+              {
+                'unit': 'example-worker.service',
+                'groups': 'backend',
+                'ready': {'type': 'systemd'}
+              },
+              {
+                'name': 'background-worker',
+                'unit': 'example-worker@42.service',
+                'groups': ['frontend'],
+                'exclude_groups': 'edge'
+              }
+            ]
+            | mraibo.serviceflow.serviceflow_plan(
+                planner_groups,
+                'start'
+              )
+          }}
+
+    - name: Verify phases, order and input normalization
       ansible.builtin.assert:
         that:
           - planner_result.phases | map(attribute='action') | list == ['stop', 'start']
@@ -42,3 +65,9 @@
           - planner_result.phases[1].services | map(attribute='name') | list == ['backend', 'frontend']
           - planner_result.phases[1].services[1].hosts == ['frontend01', 'shared01', 'edge01']
           - planner_result.skipped == []
+          - concise_result.phases[0].services[0].name == 'example-worker'
+          - concise_result.phases[0].services[0].hosts == ['backend01']
+          - concise_result.phases[0].services[0].ready.active_state == 'active'
+          - concise_result.phases[0].services[0].ready.timeout == 60
+          - concise_result.phases[0].services[1].name == 'background-worker'
+          - concise_result.phases[0].services[1].hosts == ['frontend01']
