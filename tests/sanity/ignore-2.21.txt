@@ -1,0 +1,2 @@
+plugins/filter/serviceflow_plan.py pylint:unidiomatic-typecheck # require a real boolean, not an integer
+LICENSE shebang # preserve the historical executable bit until the next repository mode-only commit
