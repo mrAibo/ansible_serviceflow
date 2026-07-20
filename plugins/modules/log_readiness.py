@@ -38,9 +38,10 @@ options:
     default: 1.0
 attributes:
   check_mode:
+    description: Supports boundary capture and readiness waits without changing managed files.
     support: full
 author:
-  - Aleksej Voronin
+  - Aleksej Voronin (@mrAibo)
 '''
 
 EXAMPLES = r'''
@@ -165,7 +166,7 @@ def _normalized_boundary(boundary):
     if not isinstance(boundary, dict):
         raise ValueError("boundary must be a mapping")
     exists = boundary.get("exists")
-    if type(exists) is not bool:
+    if not isinstance(exists, bool):
         raise ValueError("boundary.exists must be a boolean")
     if not exists:
         return _missing_boundary()
