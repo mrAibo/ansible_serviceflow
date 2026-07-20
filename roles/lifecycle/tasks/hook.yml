@@ -13,7 +13,8 @@
   vars:
     serviceflow_hook_vars: "{{ serviceflow_current_hook.vars }}"
     serviceflow_hook_context:
-      action: "{{ serviceflow_phase.action }}"
+      requested_action: "{{ serviceflow_result.action }}"
+      phase_action: "{{ serviceflow_phase.action }}"
       phase: "{{ serviceflow_hook_phase }}"
       service: "{{ serviceflow_current_service.name }}"
       unit: "{{ serviceflow_current_service.unit }}"
@@ -29,6 +30,8 @@
               'hooks': serviceflow_result.hooks
               + [
                   {
+                    'requested_action': serviceflow_result.action,
+                    'phase_action': serviceflow_phase.action,
                     'phase': serviceflow_hook_phase,
                     'name': serviceflow_current_hook.name,
                     'service': serviceflow_current_service.name,

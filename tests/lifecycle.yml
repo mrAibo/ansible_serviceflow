@@ -94,16 +94,16 @@
         - beta
     expected_hosts:
       start:
-        - alpha
-        - beta
+        - alpha_host
+        - beta_host
       stop:
-        - beta
-        - alpha
+        - beta_host
+        - alpha_host
       restart:
-        - beta
-        - alpha
-        - alpha
-        - beta
+        - beta_host
+        - alpha_host
+        - alpha_host
+        - beta_host
     expected_hook_phases:
       start:
         - before_start

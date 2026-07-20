@@ -4,12 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.1 - 2026-07-20
+
+### Security
+
+- redact hook variable values and names from public lifecycle plans and check-mode output;
+- keep the full execution plan private and clear it after lifecycle completion or failure;
+- hide plan output unless `serviceflow_show_plan` is explicitly enabled.
+
+### Fixed
+
+- require exactly one orchestration host to prevent duplicate concurrent lifecycle execution;
+- use `systemd_service` check-mode preview as the single transition decision source;
+- report initial, desired and final systemd states separately;
+- correct systemd readiness retry calculation and reject intervals greater than timeouts;
+- add the documented result schema version, redacted plan and compatibility phases;
+- include requested and phase actions in hook results and `matched` in systemd readiness results;
+- validate hook task files on the controller before changing services;
+- reject duplicate host and unit targets across logical service entries.
+
 ### Changed
 
-- update README links and status after the 0.1.0 publication;
-- consolidate future GitHub and Galaxy publication into one guarded release workflow;
-- verify role and filter documentation in CI and release builds;
-- document Galaxy account-token scope and rotation across repositories.
+- prepare collection metadata for version 0.1.1;
+- retain `phases` as a redacted compatibility alias while `plan` is the canonical public plan.
 
 ## 0.1.0 - 2026-07-15
 

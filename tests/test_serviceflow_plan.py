@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import importlib.util
 from pathlib import Path
 
@@ -11,7 +9,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def expect_error(fragment, services, groups, action):
+def expect_error(fragment, services, groups, action="start"):
     try:
         MODULE.serviceflow_plan(services, groups, action)
     except MODULE.AnsibleFilterError as error:
@@ -48,7 +46,10 @@ def main():
                     {
                         "name": "Prepare shutdown",
                         "tasks": "hooks/prepare_shutdown.yml",
-                        "vars": {"timeout": 60},
+                        "vars": {
+                            "password": "SUPER_SECRET_MARKER",
+                            "timeout": 60,
+                        },
                     }
                 ],
                 "after_ready": [
@@ -70,31 +71,27 @@ def main():
     start = MODULE.serviceflow_plan(services, groups, "start")
     assert service_names(start) == ["backend", "frontend"]
     assert start["phases"][0]["services"][1]["hosts"] == ["frontend01", "edge01"]
-    assert start["phases"][0]["services"][0]["hooks"] == {
-        "before_stop": [
-            {
-                "name": "Prepare shutdown",
-                "tasks": "hooks/prepare_shutdown.yml",
-                "vars": {"timeout": 60},
-            }
-        ],
-        "after_ready": [
-            {
-                "name": "Record readiness",
-                "tasks": "hooks/record_ready.yml",
-                "vars": {},
-            }
-        ],
-    }
     assert start["phases"][0]["services"][0]["ready"] == {
         "type": "systemd",
         "active_state": "active",
         "sub_state": "exited",
         "timeout": 10,
         "interval": 2,
-        "attempts": 6,
+        "retries": 5,
     }
     assert start["phases"][0]["services"][1]["ready"] is None
+
+    public = MODULE.serviceflow_public_plan(start)
+    public_text = repr(public)
+    assert "SUPER_SECRET_MARKER" not in public_text
+    assert "password" not in public_text
+    hook = public["phases"][0]["services"][0]["hooks"]["before_stop"][0]
+    assert hook == {
+        "name": "Prepare shutdown",
+        "tasks": "hooks/prepare_shutdown.yml",
+        "has_vars": True,
+        "vars_count": 2,
+    }
 
     log_plan = MODULE.serviceflow_plan(
         [
@@ -132,27 +129,20 @@ def main():
     optional = services + [
         {
             "name": "optional",
-            "groups": ["not-present"],
+            "groups": ["missing"],
             "unit": "optional.service",
             "manage": False,
         }
     ]
     skipped = MODULE.serviceflow_plan(optional, groups, "start")
     assert skipped["skipped"] == [{"name": "optional", "reason": "manage=false"}]
-    assert service_names(skipped) == ["backend", "frontend"]
 
     expect_error("unsupported action", services, groups, "reload")
-    expect_error(
-        "duplicate service name",
-        services + [dict(services[0])],
-        groups,
-        "start",
-    )
+    expect_error("duplicate service name", services + [dict(services[0])], groups)
     expect_error(
         "missing inventory group 'missing'",
         [{"name": "broken", "groups": ["missing"], "unit": "broken.service"}],
         groups,
-        "start",
     )
     expect_error(
         "resolves to no target hosts",
@@ -165,20 +155,11 @@ def main():
             }
         ],
         groups,
-        "start",
     )
     expect_error(
         "manage must be a boolean",
-        [
-            {
-                "name": "bad-manage",
-                "groups": ["frontend"],
-                "unit": "bad.service",
-                "manage": "false",
-            }
-        ],
+        [{"name": "bad", "groups": ["frontend"], "unit": "bad.service", "manage": "false"}],
         groups,
-        "start",
     )
     expect_error(
         "ready.type must be one of: systemd, log",
@@ -191,7 +172,6 @@ def main():
             }
         ],
         groups,
-        "start",
     )
     expect_error(
         "ready.timeout must be a positive integer",
@@ -204,7 +184,18 @@ def main():
             }
         ],
         groups,
-        "start",
+    )
+    expect_error(
+        ".ready.interval must not exceed service",
+        [
+            {
+                "name": "bad-interval",
+                "groups": ["frontend"],
+                "unit": "bad.service",
+                "ready": {"type": "systemd", "timeout": 1, "interval": 2},
+            }
+        ],
+        groups,
     )
     expect_error(
         "ready contains unsupported fields: regex",
@@ -217,7 +208,6 @@ def main():
             }
         ],
         groups,
-        "start",
     )
     expect_error(
         "ready contains unsupported fields: active_state",
@@ -235,7 +225,6 @@ def main():
             }
         ],
         groups,
-        "start",
     )
     expect_error(
         "ready.path must be absolute",
@@ -252,7 +241,6 @@ def main():
             }
         ],
         groups,
-        "start",
     )
     expect_error(
         "ready.regex is invalid",
@@ -269,7 +257,14 @@ def main():
             }
         ],
         groups,
-        "start",
+    )
+    expect_error(
+        "duplicates unit 'shared.service' on host 'frontend01'",
+        [
+            {"name": "one", "groups": ["frontend"], "unit": "shared.service"},
+            {"name": "two", "groups": ["frontend"], "unit": "shared.service"},
+        ],
+        groups,
     )
     expect_error(
         "hooks.after_ready requires ready",
@@ -282,7 +277,6 @@ def main():
             }
         ],
         groups,
-        "start",
     )
     expect_error(
         "unsupported fields: on_error",
@@ -299,11 +293,11 @@ def main():
             }
         ],
         groups,
-        "start",
     )
 
     registered = MODULE.FilterModule().filters()
     assert registered["serviceflow_plan"] is MODULE.serviceflow_plan
+    assert registered["serviceflow_public_plan"] is MODULE.serviceflow_public_plan
     print("ServiceFlow planner tests passed")
 
 

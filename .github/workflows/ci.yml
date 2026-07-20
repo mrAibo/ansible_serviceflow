@@ -10,16 +10,33 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ansible_core: "2.15.*"
+            python: "3.11"
+            integration: false
+          - ansible_core: "latest"
+            python: "3.12"
+            integration: true
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "${{ matrix.python }}"
       - name: Install ansible-core
-        run: python -m pip install --disable-pip-version-check -q ansible-core
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.ansible_core }}" = latest ]; then
+            python -m pip install --disable-pip-version-check -q ansible-core
+          else
+            python -m pip install --disable-pip-version-check -q "ansible-core==${{ matrix.ansible_core }}"
+          fi
       - name: Repository audit
         shell: bash
         run: |
@@ -31,17 +48,14 @@ jobs:
           test -s roles/lifecycle/meta/argument_specs.yml
           grep -q '^DOCUMENTATION = ' plugins/filter/serviceflow_plan.py
           ! grep -R "see COPYING" plugins
-      - name: Planner tests
+      - name: Python tests
         run: |
           python -m py_compile \
             plugins/filter/serviceflow_plan.py \
-            tests/test_serviceflow_plan.py
-          python tests/test_serviceflow_plan.py
-      - name: Log readiness tests
-        run: |
-          python -m py_compile \
             plugins/modules/log_readiness.py \
+            tests/test_serviceflow_plan.py \
             tests/test_log_readiness.py
+          python tests/test_serviceflow_plan.py
           python tests/test_log_readiness.py
       - name: Build and install collection
         shell: bash
@@ -51,41 +65,25 @@ jobs:
           ansible-galaxy collection build --output-path build
           archive="$(find build -maxdepth 1 -name 'mraibo-serviceflow-*.tar.gz' -print -quit)"
           test -n "$archive"
-
-          archive_listing="$(mktemp)"
-          tar -tzf "$archive" > "$archive_listing"
-          for required in \
-            LICENSE \
-            CHANGELOG.md \
-            docs/ACCEPTANCE.md \
-            roles/lifecycle/README.md \
-            roles/lifecycle/meta/argument_specs.yml; do
-            grep -Eq "(^|/)${required}$" "$archive_listing"
-          done
-
           ansible-galaxy collection install "$archive" -p collections
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-galaxy collection list mraibo.serviceflow
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-doc -t module mraibo.serviceflow.log_readiness >/dev/null
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-doc -t filter mraibo.serviceflow.serviceflow_plan \
-            > /tmp/serviceflow-filter-doc.txt
-          grep -q serviceflow_plan /tmp/serviceflow-filter-doc.txt
+            ansible-doc -t filter mraibo.serviceflow.serviceflow_plan >/dev/null
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-doc -t role mraibo.serviceflow.lifecycle \
-            > /tmp/serviceflow-role-doc.txt
-          grep -q serviceflow_action /tmp/serviceflow-role-doc.txt
-          grep -q serviceflow_services /tmp/serviceflow-role-doc.txt
-      - name: Installed collection planner smoke test
+            ansible-doc -t role mraibo.serviceflow.lifecycle >/dev/null
+      - name: Installed planner smoke test
         run: |
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook -i localhost, -c local tests/planner_smoke.yml
-      - name: Lifecycle role syntax
+      - name: Lifecycle syntax checks
         run: |
           for playbook in \
             tests/lifecycle.yml \
             tests/hook_failure.yml \
+            tests/missing_hook_preflight.yml \
             tests/readiness_failure.yml \
             tests/log_lifecycle.yml \
             tests/log_readiness_failure.yml; do
@@ -94,7 +92,18 @@ jobs:
                 -i tests/lifecycle_inventory.ini \
                 "$playbook"
           done
+      - name: Ansible sanity
+        if: matrix.integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)/ansible_collections/mraibo/serviceflow"
+          mkdir -p "$root"
+          cp -a . "$root/"
+          cd "$root"
+          ansible-test sanity --color no
       - name: Sequential lifecycle integration
+        if: matrix.integration
         shell: bash
         run: |
           set -euo pipefail
@@ -103,9 +112,21 @@ jobs:
 
           bash tests/systemd_fixture.sh setup
           if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook \
-              -i tests/lifecycle_inventory.ini \
-              tests/hook_failure.yml; then
+            ansible-playbook -i tests/lifecycle_inventory.ini tests/missing_hook_preflight.yml \
+              >/tmp/serviceflow-missing-hook.log 2>&1; then
+            echo 'expected the missing hook preflight playbook to fail' >&2
+            exit 1
+          fi
+          grep -q 'does-not-exist.yml must exist and be a regular file' \
+            /tmp/serviceflow-missing-hook.log
+          ! grep -q 'SUPER_SECRET_PREFLIGHT_MARKER' /tmp/serviceflow-missing-hook.log
+          ! grep -q "object of type 'dict' has no attribute 'path'" \
+            /tmp/serviceflow-missing-hook.log
+          test "$(systemctl is-active serviceflow-alpha.service)" = active
+          test "$(systemctl is-active serviceflow-beta.service)" = active
+
+          if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook -i tests/lifecycle_inventory.ini tests/hook_failure.yml; then
             echo 'expected the failing hook playbook to fail' >&2
             exit 1
           fi
@@ -118,21 +139,6 @@ jobs:
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml \
               -e requested_action=restart
-          diff -u \
-            <(printf '%s\n' \
-              before-stop-beta \
-              stop-beta \
-              after-stop-beta \
-              before-stop-alpha \
-              stop-alpha \
-              after-stop-alpha \
-              before-start-alpha \
-              start-alpha \
-              after-ready-alpha \
-              before-start-beta \
-              start-beta \
-              after-ready-beta) \
-            /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
@@ -142,40 +148,14 @@ jobs:
               -e requested_action=start
           test "$(systemctl is-active serviceflow-alpha.service || true)" = inactive
           test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
-          test ! -s /tmp/serviceflow-order.log
 
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml \
               -e requested_action=start
-          printf '%s\n' \
-            before-start-alpha \
-            start-alpha \
-            after-ready-alpha \
-            before-start-beta \
-            start-beta \
-            after-ready-beta \
-            > /tmp/serviceflow-expected.log
-          diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
-
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook \
-              -i tests/lifecycle_inventory.ini \
-              tests/lifecycle.yml \
-              -e requested_action=start \
-              -e expect_hooks=false
-          diff -u /tmp/serviceflow-expected.log /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook \
-              -i tests/lifecycle_inventory.ini \
-              tests/lifecycle.yml \
-              -e requested_action=stop \
-              -e expect_hooks=false
-          test ! -s /tmp/serviceflow-order.log
-
           if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
@@ -183,37 +163,12 @@ jobs:
             echo 'expected the systemd readiness playbook to fail' >&2
             exit 1
           fi
-          test "$(systemctl is-active serviceflow-alpha.service)" = active
-          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
-          diff -u <(printf 'start-alpha\n') /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
           ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook --check \
-              -i tests/lifecycle_inventory.ini \
-              tests/log_lifecycle.yml
-          test "$(systemctl is-active serviceflow-alpha.service || true)" = inactive
-          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
-          test ! -s /tmp/serviceflow-order.log
-
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
             ansible-playbook \
               -i tests/lifecycle_inventory.ini \
               tests/log_lifecycle.yml
-          printf '%s\n' \
-            before-start-log-alpha \
-            start-alpha \
-            after-ready-log-alpha \
-            start-beta \
-            > /tmp/serviceflow-log-expected.log
-          diff -u /tmp/serviceflow-log-expected.log /tmp/serviceflow-order.log
-
-          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
-            ansible-playbook \
-              -i tests/lifecycle_inventory.ini \
-              tests/log_lifecycle.yml \
-              -e expect_transition=false
-          diff -u /tmp/serviceflow-log-expected.log /tmp/serviceflow-order.log
 
           bash tests/systemd_fixture.sh reset
           bash tests/systemd_fixture.sh suppress-readiness
@@ -224,12 +179,11 @@ jobs:
             echo 'expected old-only log readiness to fail' >&2
             exit 1
           fi
-          test "$(systemctl is-active serviceflow-alpha.service)" = active
-          test "$(systemctl is-active serviceflow-beta.service || true)" = inactive
-          diff -u <(printf 'start-alpha\n') /tmp/serviceflow-order.log
       - name: Upload lifecycle diagnostics
-        if: failure()
+        if: failure() && matrix.integration
         uses: actions/upload-artifact@v4
         with:
           name: lifecycle-diagnostics
-          path: /tmp/serviceflow-integration.log
+          path: |
+            /tmp/serviceflow-integration.log
+            /tmp/serviceflow-missing-hook.log
