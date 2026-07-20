@@ -201,7 +201,7 @@ def _systemd_readiness(value, field, timeout, interval):
         "sub_state": sub_state,
         "timeout": timeout,
         "interval": interval,
-        "attempts": max(1, (timeout + interval - 1) // interval + 1),
+        "retries": timeout // interval,
     }
 
 
@@ -243,6 +243,8 @@ def _readiness(value, field):
         value.get("interval", default_interval),
         f"{field}.interval",
     )
+    if interval > timeout:
+        _fail(f"{field}.interval must not exceed {field}.timeout")
 
     if readiness_type == "systemd":
         return _systemd_readiness(value, field, timeout, interval)
@@ -251,6 +253,48 @@ def _readiness(value, field):
 
 def _phase(action, services):
     return {"action": action, "services": list(services)}
+
+
+def _public_hook(hook):
+    variables = hook.get("vars", {})
+    return {
+        "name": hook["name"],
+        "tasks": hook["tasks"],
+        "has_vars": bool(variables),
+        "vars_count": len(variables),
+    }
+
+
+def _public_service(service):
+    hooks = {
+        phase: [_public_hook(hook) for hook in entries]
+        for phase, entries in service.get("hooks", {}).items()
+    }
+    return {
+        "name": service["name"],
+        "unit": service["unit"],
+        "hosts": list(service["hosts"]),
+        "hooks": hooks,
+        "ready": service.get("ready"),
+    }
+
+
+def serviceflow_public_plan(plan):
+    """Return a plan safe for output and persistence."""
+
+    if not isinstance(plan, Mapping):
+        _fail("execution plan must be a mapping")
+    return {
+        "action": plan["action"],
+        "phases": [
+            {
+                "action": phase["action"],
+                "services": [_public_service(service) for service in phase["services"]],
+            }
+            for phase in plan["phases"]
+        ],
+        "skipped": list(plan["skipped"]),
+    }
 
 
 def serviceflow_plan(services, inventory_groups, action):
@@ -270,6 +314,7 @@ def serviceflow_plan(services, inventory_groups, action):
     planned = []
     skipped = []
     service_names = set()
+    managed_targets = {}
 
     for index, service in enumerate(services):
         field = f"serviceflow_services[{index}]"
@@ -312,16 +357,27 @@ def serviceflow_plan(services, inventory_groups, action):
             skipped.append({"name": name, "reason": "manage=false"})
             continue
 
+        hosts = _resolve_hosts(
+            name,
+            group_names,
+            exclude_group_names,
+            inventory_groups,
+        )
+        for host in hosts:
+            target = (host, unit)
+            previous = managed_targets.get(target)
+            if previous is not None:
+                _fail(
+                    f"service '{name}' duplicates unit '{unit}' on host '{host}' "
+                    f"already managed by service '{previous}'"
+                )
+            managed_targets[target] = name
+
         planned.append(
             {
                 "name": name,
                 "unit": unit,
-                "hosts": _resolve_hosts(
-                    name,
-                    group_names,
-                    exclude_group_names,
-                    inventory_groups,
-                ),
+                "hosts": hosts,
                 "hooks": hooks,
                 "ready": readiness,
             }
@@ -346,4 +402,7 @@ def serviceflow_plan(services, inventory_groups, action):
 
 class FilterModule:
     def filters(self):
-        return {"serviceflow_plan": serviceflow_plan}
+        return {
+            "serviceflow_plan": serviceflow_plan,
+            "serviceflow_public_plan": serviceflow_public_plan,
+        }
