@@ -1,0 +1,34 @@
+---
+- name: Restore {{ serviceflow_rollback_item.unit }} on {{ serviceflow_rollback_item.host }}
+  ansible.builtin.systemd_service:
+    name: "{{ serviceflow_rollback_item.unit }}"
+    state: >-
+      {{
+        'started'
+        if serviceflow_rollback_item.initial_active_state in ['active', 'activating']
+        else 'stopped'
+      }}
+  delegate_to: "{{ serviceflow_rollback_item.host }}"
+  become: "{{ serviceflow_become }}"
+  register: serviceflow_rollback_result
+
+- name: Record rollback operation
+  ansible.builtin.set_fact:
+    serviceflow_result: >-
+      {{
+        serviceflow_result
+        | combine(
+            {
+              'rollback': serviceflow_result.rollback
+              + [
+                  {
+                    'service': serviceflow_rollback_item.service,
+                    'unit': serviceflow_rollback_item.unit,
+                    'host': serviceflow_rollback_item.host,
+                    'restored_active_state': serviceflow_rollback_item.initial_active_state,
+                    'changed': serviceflow_rollback_result.changed | bool
+                  }
+                ]
+            }
+          )
+      }}
