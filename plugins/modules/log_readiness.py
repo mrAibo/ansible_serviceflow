@@ -86,6 +86,7 @@ truncations:
   type: int
 '''
 
+import codecs
 import hashlib
 import os
 import re
@@ -103,6 +104,18 @@ class LogReadinessTimeout(Exception):
         self.result = result
 
 
+def _missing_boundary():
+    return {
+        "exists": False,
+        "device": None,
+        "inode": None,
+        "offset": 0,
+        "anchor_offset": 0,
+        "anchor_length": 0,
+        "anchor_sha256": None,
+    }
+
+
 def _regular_stat(path):
     try:
         file_stat = os.stat(path)
@@ -113,12 +126,11 @@ def _regular_stat(path):
     return file_stat
 
 
-def _anchor(path, offset):
+def _anchor_from_stream(stream, offset):
     length = min(offset, _ANCHOR_SIZE)
     anchor_offset = offset - length
-    with open(path, "rb") as stream:
-        stream.seek(anchor_offset)
-        data = stream.read(length)
+    stream.seek(anchor_offset)
+    data = stream.read(length)
     return {
         "anchor_offset": anchor_offset,
         "anchor_length": len(data),
@@ -126,25 +138,27 @@ def _anchor(path, offset):
     }
 
 
+def _anchor(path, offset):
+    with open(path, "rb") as stream:
+        return _anchor_from_stream(stream, offset)
+
+
 def capture_boundary(path):
-    file_stat = _regular_stat(path)
-    if file_stat is None:
-        return {
-            "exists": False,
-            "device": None,
-            "inode": None,
-            "offset": 0,
-            "anchor_offset": 0,
-            "anchor_length": 0,
-            "anchor_sha256": None,
-        }
-    return {
-        "exists": True,
-        "device": file_stat.st_dev,
-        "inode": file_stat.st_ino,
-        "offset": file_stat.st_size,
-        **_anchor(path, file_stat.st_size),
-    }
+    try:
+        with open(path, "rb") as stream:
+            file_stat = os.fstat(stream.fileno())
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise ValueError(f"log path is not a regular file: {path}")
+            offset = file_stat.st_size
+            return {
+                "exists": True,
+                "device": file_stat.st_dev,
+                "inode": file_stat.st_ino,
+                "offset": offset,
+                **_anchor_from_stream(stream, offset),
+            }
+    except FileNotFoundError:
+        return _missing_boundary()
 
 
 def _normalized_boundary(boundary):
@@ -154,15 +168,7 @@ def _normalized_boundary(boundary):
     if type(exists) is not bool:
         raise ValueError("boundary.exists must be a boolean")
     if not exists:
-        return {
-            "exists": False,
-            "device": None,
-            "inode": None,
-            "offset": 0,
-            "anchor_offset": 0,
-            "anchor_length": 0,
-            "anchor_sha256": None,
-        }
+        return _missing_boundary()
 
     normalized = {"exists": True}
     for key in ("device", "inode", "offset", "anchor_offset", "anchor_length"):
@@ -181,18 +187,14 @@ def _normalized_boundary(boundary):
 def _anchor_matches(path, tracked):
     if tracked.get("anchor_sha256") is None:
         return True
-
-    end = tracked["anchor_offset"] + tracked["anchor_length"]
     try:
         with open(path, "rb") as stream:
             stream.seek(tracked["anchor_offset"])
             data = stream.read(tracked["anchor_length"])
     except FileNotFoundError:
         return False
-
     return (
         len(data) == tracked["anchor_length"]
-        and end <= tracked["offset"]
         and hashlib.sha256(data).hexdigest() == tracked["anchor_sha256"]
     )
 
@@ -236,14 +238,16 @@ def _locate_identity(path, tracked):
                 entry_stat = entry.stat(follow_symlinks=True)
             except FileNotFoundError:
                 continue
-            if not stat.S_ISREG(entry_stat.st_mode):
-                continue
-            if _identity_matches(entry_stat, tracked):
+            if stat.S_ISREG(entry_stat.st_mode) and _identity_matches(entry_stat, tracked):
                 return entry.path, entry_stat
     return None, None
 
 
-def _read_new_data(path, offset, pattern, buffer):
+def _new_decoder():
+    return codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+
+def _read_new_data(path, offset, pattern, buffer, decoder):
     bytes_read = 0
     with open(path, "rb") as stream:
         stream.seek(offset)
@@ -253,12 +257,29 @@ def _read_new_data(path, offset, pattern, buffer):
                 break
             offset += len(chunk)
             bytes_read += len(chunk)
-            buffer += chunk.decode("utf-8", errors="replace")
+            buffer += decoder.decode(chunk, final=False)
             if pattern.search(buffer):
-                return offset, buffer, True, bytes_read
+                return offset, buffer, decoder, True, bytes_read
             if len(buffer) > _TAIL_LIMIT:
                 buffer = buffer[-_TAIL_LIMIT:]
-    return offset, buffer, False, bytes_read
+    return offset, buffer, decoder, False, bytes_read
+
+
+def _tracked_from_boundary(boundary):
+    if not boundary["exists"]:
+        return None
+    return dict(boundary)
+
+
+def _new_tracking(file_stat):
+    return {
+        "device": file_stat.st_dev,
+        "inode": file_stat.st_ino,
+        "offset": 0,
+        "anchor_offset": 0,
+        "anchor_length": 0,
+        "anchor_sha256": None,
+    }
 
 
 def _state_snapshot(path, tracked):
@@ -271,30 +292,6 @@ def _state_snapshot(path, tracked):
         "tracked_device": tracked["device"] if tracked else None,
         "tracked_inode": tracked["inode"] if tracked else None,
         "tracked_offset": tracked["offset"] if tracked else 0,
-    }
-
-
-def _tracked_from_boundary(boundary):
-    if not boundary["exists"]:
-        return None
-    return {
-        "device": boundary["device"],
-        "inode": boundary["inode"],
-        "offset": boundary["offset"],
-        "anchor_offset": boundary["anchor_offset"],
-        "anchor_length": boundary["anchor_length"],
-        "anchor_sha256": boundary["anchor_sha256"],
-    }
-
-
-def _new_tracking(file_stat):
-    return {
-        "device": file_stat.st_dev,
-        "inode": file_stat.st_ino,
-        "offset": 0,
-        "anchor_offset": 0,
-        "anchor_length": 0,
-        "anchor_sha256": None,
     }
 
 
@@ -311,12 +308,11 @@ def _matched_result(path, tracked, started, bytes_read, rotations, truncations):
 
 def wait_for_match(path, regex, boundary, timeout, interval):
     pattern = re.compile(regex, re.MULTILINE)
-    boundary = _normalized_boundary(boundary)
-    tracked = _tracked_from_boundary(boundary)
-
+    tracked = _tracked_from_boundary(_normalized_boundary(boundary))
     started = time.monotonic()
     deadline = started + timeout
     buffer = ""
+    decoder = _new_decoder()
     bytes_read = 0
     rotations = 0
     truncations = 0
@@ -325,31 +321,22 @@ def wait_for_match(path, regex, boundary, timeout, interval):
         if tracked is not None:
             tracked_path, tracked_stat = _locate_identity(path, tracked)
             if tracked_path is not None:
-                if (
-                    tracked_stat.st_size < tracked["offset"]
-                    or not _anchor_matches(tracked_path, tracked)
-                ):
+                if tracked_stat.st_size < tracked["offset"] or not _anchor_matches(tracked_path, tracked):
                     tracked["offset"] = 0
                     tracked["anchor_sha256"] = None
                     buffer = ""
+                    decoder = _new_decoder()
                     truncations += 1
-
-                (
+                tracked["offset"], buffer, decoder, matched, read_count = _read_new_data(
+                    tracked_path,
                     tracked["offset"],
+                    pattern,
                     buffer,
-                    matched,
-                    read_count,
-                ) = _read_new_data(tracked_path, tracked["offset"], pattern, buffer)
+                    decoder,
+                )
                 bytes_read += read_count
                 if matched:
-                    return _matched_result(
-                        path,
-                        tracked,
-                        started,
-                        bytes_read,
-                        rotations,
-                        truncations,
-                    )
+                    return _matched_result(path, tracked, started, bytes_read, rotations, truncations)
                 _refresh_anchor(tracked_path, tracked)
 
         current_stat = _regular_stat(path)
@@ -358,22 +345,17 @@ def wait_for_match(path, regex, boundary, timeout, interval):
                 rotations += 1
             tracked = _new_tracking(current_stat)
             buffer = ""
-            (
-                tracked["offset"],
+            decoder = _new_decoder()
+            tracked["offset"], buffer, decoder, matched, read_count = _read_new_data(
+                path,
+                0,
+                pattern,
                 buffer,
-                matched,
-                read_count,
-            ) = _read_new_data(path, 0, pattern, buffer)
+                decoder,
+            )
             bytes_read += read_count
             if matched:
-                return _matched_result(
-                    path,
-                    tracked,
-                    started,
-                    bytes_read,
-                    rotations,
-                    truncations,
-                )
+                return _matched_result(path, tracked, started, bytes_read, rotations, truncations)
             _refresh_anchor(path, tracked)
 
         now = time.monotonic()
@@ -396,11 +378,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec={
-            "action": {
-                "type": "str",
-                "required": True,
-                "choices": ["capture", "wait"],
-            },
+            "action": {"type": "str", "required": True, "choices": ["capture", "wait"]},
             "path": {"type": "path", "required": True},
             "regex": {"type": "str"},
             "boundary": {"type": "dict"},
@@ -441,10 +419,7 @@ def main():
         module.exit_json(changed=False, **result)
     except LogReadinessTimeout as error:
         module.fail_json(
-            msg=(
-                f"timed out after {timeout} seconds waiting for regex "
-                f"in new data from {path}"
-            ),
+            msg=f"timed out after {timeout} seconds waiting for regex in new data from {path}",
             **error.result,
         )
     except (OSError, ValueError) as error:
