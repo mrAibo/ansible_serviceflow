@@ -26,7 +26,7 @@
           (
             'SubState=' ~ serviceflow_current_service.ready.sub_state
           ) in serviceflow_readiness_result.stdout_lines
-      retries: "{{ serviceflow_current_service.ready.retries }}"
+      retries: "{{ serviceflow_current_service.ready.retries + 1 }}"
       delay: "{{ serviceflow_current_service.ready.interval }}"
   rescue:
     - name: Report systemd readiness failure
