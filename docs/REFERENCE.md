@@ -176,7 +176,7 @@ Fields:
 - `path`: required absolute path;
 - `regex`: required valid Python regular expression;
 - `timeout`: positive integer seconds, default `60`;
-- `interval`: positive integer seconds, default `2`.
+- `interval`: positive integer seconds, default `1`.
 
 Immediately before a real start transition, ServiceFlow captures a file boundary. Only bytes written after that boundary can satisfy the regex. Existing matching content is ignored.
 
@@ -187,7 +187,7 @@ Supported file changes:
 - same-inode truncation or rewrite;
 - rename-based rotation followed by a new file at the configured path.
 
-The matcher decodes new bytes as UTF-8 with replacement and retains a bounded 64-KiB rolling text window. It is intended for short readiness records, not unbounded multi-megabyte multiline events.
+The matcher incrementally decodes new bytes as UTF-8 with replacement across read-chunk boundaries and retains a bounded 64-KiB rolling text window. Decoder state is reset after rotation or truncation. It is intended for short readiness records, not unbounded multi-megabyte multiline events.
 
 When the service is already active, no new startup boundary exists. The log check is reported as skipped with reason `no_start_transition`.
 
