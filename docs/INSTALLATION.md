@@ -22,7 +22,7 @@ ansible-galaxy collection install mraibo.serviceflow
 Install an exact version for reproducible automation:
 
 ```bash
-ansible-galaxy collection install mraibo.serviceflow:0.1.0
+ansible-galaxy collection install mraibo.serviceflow:0.2.1
 ```
 
 ## Install with `requirements.yml`
@@ -31,7 +31,7 @@ ansible-galaxy collection install mraibo.serviceflow:0.1.0
 ---
 collections:
   - name: mraibo.serviceflow
-    version: "0.1.0"
+    version: "0.2.1"
 ```
 
 ```bash
@@ -49,7 +49,7 @@ Before Galaxy publication, or when testing a repository tag:
 collections:
   - name: https://github.com/mrAibo/ansible_serviceflow.git
     type: git
-    version: "0.1.0"
+    version: "0.2.1"
 ```
 
 ## Install a locally built artifact
@@ -57,12 +57,12 @@ collections:
 ```bash
 git clone https://github.com/mrAibo/ansible_serviceflow.git
 cd ansible_serviceflow
-git switch --detach 0.1.0
+git switch --detach 0.2.1
 
 mkdir -p build
 ansible-galaxy collection build --output-path build
 ansible-galaxy collection install \
-  build/mraibo-serviceflow-0.1.0.tar.gz \
+  build/mraibo-serviceflow-0.2.1.tar.gz \
   --force
 ```
 
@@ -86,9 +86,9 @@ This applies to service management, readiness operations and hook task files. Se
 
 ServiceFlow does not configure sudoers. Privilege policy remains the responsibility of the consuming environment.
 
-## Unsupported platforms in 0.1.0
+## Unsupported platforms
 
-Version 0.1.0 does not manage:
+ServiceFlow does not manage:
 
 - SysV init;
 - OpenRC;
