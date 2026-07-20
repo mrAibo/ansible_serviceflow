@@ -5,30 +5,13 @@
 
 Ordered, cross-host systemd lifecycle orchestration for Ansible.
 
-> **Status:** Version 0.1.0 is published on [Ansible Galaxy](https://galaxy.ansible.com/ui/repo/published/mraibo/serviceflow/) and available as a [GitHub Release](https://github.com/mrAibo/ansible_serviceflow/releases/tag/0.1.0).
+> **Status:** Version 0.1.0 is published. Version 0.1.1 is the current bug-fix candidate for lifecycle safety, result correctness and plan redaction.
 
 ServiceFlow manages application stacks whose services live in different inventory groups and must follow one strict lifecycle order. It complements `ansible.builtin.systemd_service`; it does not replace or reimplement it.
 
 ## Why ServiceFlow
 
-A normal Ansible playbook can manage individual units very well. It becomes harder to keep correct when an application needs all of the following at once:
-
-- one global start order across multiple inventory groups;
-- the exact reverse order for stop;
-- a complete stop-then-start restart;
-- application tasks immediately before or after a service boundary;
-- readiness stronger than `systemctl start` returning successfully;
-- a log message produced by the current start, not an old matching line;
-- complete configuration validation before the first service changes;
-- one structured result for the entire lifecycle.
-
-ServiceFlow provides that orchestration contract while continuing to use Ansible built-ins for resource operations.
-
-## How it differs from standard modules and community collections
-
-`ansible.builtin.systemd_service` remains the correct tool for one unit operation. `ansible.builtin.wait_for`, `uri` and `service_facts` remain the correct general-purpose tools for their individual tasks. Community collections also provide many useful resource modules.
-
-ServiceFlow is different because it coordinates those operations as one application lifecycle:
+A normal Ansible playbook manages individual units well. ServiceFlow adds one application-level lifecycle contract:
 
 ```text
 ordered service list
@@ -36,14 +19,14 @@ ordered service list
 + transition-aware task-file hooks
 + systemd or current-start log readiness
 + automatic reverse stop
-+ structured lifecycle result
++ redacted structured lifecycle result
 ```
 
-It deliberately does not add another systemd client, dependency framework or application-specific plugin system. See [Migration and comparison](docs/MIGRATION_AND_COMPARISON.md) for detailed examples and guidance on when not to use ServiceFlow.
+Start follows the declared order. Stop uses the exact reverse order. Restart performs a complete stop sequence followed by a complete start sequence.
 
 ## Installation
 
-Install the published collection from Ansible Galaxy:
+Until 0.1.1 is released, install the published version:
 
 ```bash
 ansible-galaxy collection install mraibo.serviceflow:0.1.0
@@ -63,9 +46,8 @@ Requirements:
 - `ansible-core >= 2.15`;
 - Linux managed hosts using systemd;
 - Python available for Ansible module execution;
-- appropriate become permissions.
-
-See [Installation and compatibility](docs/INSTALLATION.md).
+- appropriate become permissions;
+- exactly one orchestration host in the play.
 
 ## Minimal example
 
@@ -107,36 +89,45 @@ See [Installation and compatibility](docs/INSTALLATION.md).
     - role: mraibo.serviceflow.lifecycle
 ```
 
-Start order:
-
-```text
-database → application → frontend
-```
-
-Stop order:
-
-```text
-frontend → application → database
-```
-
-Restart performs the complete stop sequence followed by the complete start sequence.
-
-For a copyable project layout, inventory, hooks and commands, see [Quick start](docs/QUICKSTART.md).
-
 ## Key behavior
 
 - Services and resolved hosts are processed sequentially.
 - Hosts from multiple groups are merged and deduplicated.
+- Duplicate combinations of target host and systemd unit are rejected.
 - `exclude_groups` removes maintenance or otherwise excluded hosts.
 - `manage` must evaluate to a boolean and can skip a complete service entry.
 - Hooks are native task files: `before_start`, `before_stop`, `after_ready`, `after_stop`.
+- Hook task files are checked on the controller before the first service change.
+- Systemd transition prediction uses `ansible.builtin.systemd_service` in check mode.
+- Results distinguish initial, desired and final systemd state.
 - Systemd readiness checks expected `ActiveState` and optional `SubState`.
 - Log readiness accepts only bytes written after the current start boundary.
-- Existing matching log lines are ignored.
-- Log files are never deleted, rewritten or returned in results.
-- Check mode validates and predicts without running hooks or waiting for future readiness.
+- Log boundaries are captured atomically from one open file descriptor.
+- UTF-8 decoding is preserved across binary read chunks.
+- Check mode predicts changes without running hooks or readiness waits.
+- Public plans omit hook variable names and values.
+- Plan output is disabled by default and may be enabled with `serviceflow_show_plan: true`.
 - The lifecycle stops on the first validation, hook, service or readiness failure.
-- Version 0.1.0 does not automatically roll back a unit that started but failed readiness.
+- Automatic rollback is not provided in the 0.1 release line.
+
+## Result schema
+
+Version 0.1.1 returns:
+
+```yaml
+serviceflow_result:
+  schema_version: 1
+  action: restart
+  check_mode: false
+  plan: {}
+  phases: []
+  processed: []
+  skipped: []
+  hooks: []
+  readiness: []
+```
+
+`plan` and the compatibility `phases` field are redacted. The private execution plan is not returned.
 
 ## Documentation
 
@@ -160,20 +151,7 @@ ansible-doc -t filter mraibo.serviceflow.serviceflow_plan
 ansible-doc mraibo.serviceflow.log_readiness
 ```
 
-## Version 0.1.0 scope
-
-Included:
-
-- ordered start and reverse-order stop;
-- restart as full stop plus full start;
-- group resolution, deduplication, exclusions and `manage` selection;
-- transition-aware task-file hooks;
-- systemd readiness;
-- new-log-entry readiness with rotation and truncation handling;
-- check-mode planning;
-- structured results and fail-fast validation.
-
-Deferred:
+## Deferred functionality
 
 - arbitrary dependency graphs;
 - parallel or rolling execution;
@@ -184,7 +162,7 @@ Deferred:
 
 ## Security
 
-Application hooks are trusted code owned by the consuming project. Keep secrets in Ansible Vault or an approved secret backend, use `no_log` for sensitive operations and never commit product-specific hosts, credentials or proprietary log content to this repository.
+Application hooks are trusted code owned by the consuming project. Keep secrets in Ansible Vault or an approved secret backend and use `no_log` for sensitive operations. Hook variables are available to the private execution path but are not included in the public plan or result.
 
 ## License
 
