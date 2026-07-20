@@ -6,20 +6,23 @@ After the role completes, `serviceflow_result` contains machine-readable details
 
 ```yaml
 serviceflow_result:
-  schema_version: 1
+  schema_version: 2
   action: restart
   check_mode: false
+  plan_only: false
+  failure_policy: rollback
   plan: {}
   phases: []
   processed: []
   skipped: []
   hooks: []
   readiness: []
+  rollback: []
 ```
 
-`plan` is the canonical redacted public plan. `phases` is a redacted compatibility alias retained for the 0.1 release line.
+`plan` is the canonical redacted public plan. `phases` remains a redacted compatibility alias. The private execution plan is never stored in the result.
 
-The private execution plan is never stored in `serviceflow_result`. Hook variable names and values are replaced by `has_vars` and `vars_count` metadata.
+Hook variable names and values are replaced by `has_vars` and `vars_count`. HTTP headers, usernames and passwords are replaced by `has_headers` and `has_auth` markers.
 
 ## Processed operations
 
@@ -41,18 +44,7 @@ One entry is recorded per service and host operation:
   check_mode: false
 ```
 
-In check mode, `final_active_state` and `final_sub_state` are `null`; `predicted_change` and `desired_active_state` describe the predicted operation.
-
-## Skipped definitions
-
-Configuration-level skips currently include `manage=false`:
-
-```yaml
-- name: optional-worker
-  reason: manage=false
-```
-
-This differs from a log readiness check being skipped because no start transition occurred.
+In check mode, final states are `null`; `predicted_change` and `desired_active_state` describe the predicted operation. Plan-only mode produces no processed operations.
 
 ## Hook results
 
@@ -60,19 +52,19 @@ Executed hooks identify both the requested lifecycle action and the concrete pha
 
 ```yaml
 - requested_action: restart
-  phase_action: stop
-  phase: before_stop
+  phase_action: start
+  phase: after_start
   service: application
   unit: example-application.service
   host: app-a.example.invalid
-  name: Drain application work
+  name: Warm application cache
 ```
 
-Hooks that do not run because no transition is required are not reported as executed.
+Hooks that do not run because no transition is required are not reported.
 
 ## Readiness results
 
-### Systemd readiness
+### Systemd
 
 ```yaml
 - type: systemd
@@ -85,7 +77,7 @@ Hooks that do not run because no transition is required are not reported as exec
   attempts: 1
 ```
 
-### Log readiness
+### Log
 
 ```yaml
 - type: log
@@ -101,17 +93,68 @@ Hooks that do not run because no transition is required are not reported as exec
 
 Log content is never returned.
 
-### Skipped log readiness
-
-When a service is already active, no new start boundary exists:
+### Port
 
 ```yaml
-- type: log
+- type: port
   service: application
   unit: example-application.service
   host: app-a.example.invalid
-  skipped: true
-  reason: no_start_transition
+  matched: true
+  connect_host: 127.0.0.1
+  port: 8080
+  elapsed: 1
+```
+
+### HTTP
+
+```yaml
+- type: http
+  service: application
+  unit: example-application.service
+  host: app-a.example.invalid
+  matched: true
+  status: 200
+  attempts: 2
+```
+
+Response bodies, headers and credentials are not returned.
+
+### Journal
+
+```yaml
+- type: journal
+  service: application
+  unit: example-application.service
+  host: app-a.example.invalid
+  matched: true
+  journal_unit: example-application.service
+  attempts: 1
+```
+
+Only entries after the cursor captured before the current start can satisfy the check.
+
+## Rollback results
+
+With `serviceflow_failure_policy: rollback`, only transitions changed by the current run are restored, in reverse order:
+
+```yaml
+- service: application
+  unit: example-application.service
+  host: app-a.example.invalid
+  restored_active_state: inactive
+  changed: true
+```
+
+Rollback does not execute hooks or readiness checks. The role still fails after rollback so the original lifecycle failure remains visible to automation.
+
+## Skipped definitions
+
+Configuration-level skips currently include `manage=false`:
+
+```yaml
+- name: optional-worker
+  reason: manage=false
 ```
 
 ## Assertions in consuming playbooks
@@ -120,7 +163,7 @@ When a service is already active, no new start boundary exists:
 - name: Verify result schema and readiness
   ansible.builtin.assert:
     that:
-      - serviceflow_result.schema_version == 1
+      - serviceflow_result.schema_version == 2
       - serviceflow_result.skipped | length == 0
       - >-
         serviceflow_result.readiness
@@ -143,4 +186,4 @@ A consuming project may write the redacted result on the controller:
   delegate_to: localhost
 ```
 
-Hostnames, unit names, task paths and configured log paths may still be operationally sensitive even though hook variables and log contents are excluded.
+Hostnames, unit names, task paths, URLs and configured paths may still be operationally sensitive even though hook variables, HTTP secrets and log content are excluded.
