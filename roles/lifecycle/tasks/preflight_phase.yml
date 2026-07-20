@@ -1,0 +1,30 @@
+---
+- name: Inspect hook task files for {{ serviceflow_preflight_service.name }}
+  ansible.builtin.stat:
+    path: >-
+      {{
+        item.tasks
+        if item.tasks.startswith('/')
+        else playbook_dir ~ '/' ~ item.tasks
+      }}
+  delegate_to: localhost
+  become: false
+  loop: "{{ serviceflow_preflight_phase.value }}"
+  loop_control:
+    index_var: serviceflow_preflight_index
+    label: "{{ item.tasks }}"
+  register: serviceflow_preflight_stats
+
+- name: Reject invalid hook task files for {{ serviceflow_preflight_service.name }}
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: >-
+      ServiceFlow validation failed for service '{{ serviceflow_preflight_service.name }}'.hooks.{{
+      serviceflow_preflight_phase.key }}[{{ item.serviceflow_preflight_index }}]:
+      {{ item.invocation.module_args.path }} must exist and be a regular file on
+      the Ansible controller.
+  loop: "{{ serviceflow_preflight_stats.results }}"
+  loop_control:
+    label: "{{ item.invocation.module_args.path }}"
