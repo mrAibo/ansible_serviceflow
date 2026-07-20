@@ -1,13 +1,54 @@
 ---
-- name: Validate hook files for lifecycle services
-  ansible.builtin.include_tasks: preflight_service.yml
-  loop: >-
-    {{
-      _serviceflow_execution_plan.phases
-      | map(attribute='services')
-      | flatten
-      | unique(attribute='name')
-    }}
+- name: Build private hook file preflight list
+  ansible.builtin.set_fact:
+    _serviceflow_hook_files: >-
+      {%- set result = namespace(files=[]) -%}
+      {%- for service in _serviceflow_execution_plan.phases[0].services -%}
+        {%- for phase, hooks in service.hooks.items() -%}
+          {%- for hook in hooks -%}
+            {%- set result.files = result.files + [
+              {
+                'service': service.name,
+                'phase': phase,
+                'index': loop.index0,
+                'tasks': hook.tasks
+              }
+            ] -%}
+          {%- endfor -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result.files }}
+  no_log: true
+
+- name: Inspect lifecycle hook files
+  ansible.builtin.stat:
+    path: >-
+      {{
+        item.tasks
+        if item.tasks.startswith('/')
+        else playbook_dir ~ '/' ~ item.tasks
+      }}
+  delegate_to: localhost
+  become: false
+  loop: "{{ _serviceflow_hook_files }}"
   loop_control:
-    loop_var: serviceflow_preflight_service
-    label: "{{ serviceflow_preflight_service.name }}"
+    label: "{{ item.service }}:{{ item.phase }}[{{ item.index }}]"
+  register: serviceflow_preflight_stats
+
+- name: Reject invalid lifecycle hook files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: >-
+      Hook file {{ item.item.tasks }} for
+      {{ item.item.service }}:{{ item.item.phase }}[{{ item.item.index }}]
+      must exist and be a regular file on the Ansible controller.
+  loop: "{{ serviceflow_preflight_stats.results }}"
+  loop_control:
+    label: "{{ item.item.tasks }}"
+
+- name: Clear private hook file preflight list
+  ansible.builtin.set_fact:
+    _serviceflow_hook_files: []
+  no_log: true
