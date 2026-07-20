@@ -1,0 +1,120 @@
+name: Release 0.2.0
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-0.2.0
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: galaxy
+    env:
+      RELEASE_TAG: 0.2.0
+      RELEASE_TARGET_SHA: b1a5c6eee709fba941e1c320cb9e7c2a66717981
+      GALAXY_TOKEN: ${{ secrets.ANSIBLE_GALAXY_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TARGET_SHA }}
+
+      - name: Install release requirements
+        run: python3 -m pip install --disable-pip-version-check -q ansible-core
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          metadata = yaml.safe_load(Path('galaxy.yml').read_text(encoding='utf-8'))
+          version = str(metadata['version'])
+          if version != '0.2.0':
+              raise SystemExit(f'galaxy.yml version is {version!r}, expected 0.2.0')
+          changelog = Path('CHANGELOG.md').read_text(encoding='utf-8')
+          if '## 0.2.0 -' not in changelog:
+              raise SystemExit('CHANGELOG.md has no 0.2.0 release section')
+          PY
+
+      - name: Run regression tests
+        run: |
+          python3 -m py_compile \
+            plugins/filter/serviceflow_plan.py \
+            plugins/modules/log_readiness.py \
+            tests/test_serviceflow_plan.py \
+            tests/test_serviceflow_input_normalization.py \
+            tests/test_log_readiness.py
+          python3 tests/test_serviceflow_plan.py
+          python3 tests/test_serviceflow_input_normalization.py
+          python3 tests/test_log_readiness.py
+
+      - name: Run Ansible sanity tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)/ansible_collections/mraibo/serviceflow"
+          mkdir -p "$root"
+          cp -a . "$root/"
+          cd "$root"
+          ansible-test sanity --color no
+
+      - name: Build and smoke-test collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build collections
+          ansible-galaxy collection build --output-path build
+          archive="build/mraibo-serviceflow-0.2.0.tar.gz"
+          test -f "$archive"
+          ansible-galaxy collection install "$archive" -p collections
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" ansible-doc -t role mraibo.serviceflow.lifecycle >/dev/null
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" ansible-doc -t filter mraibo.serviceflow.serviceflow_plan >/dev/null
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" ansible-doc mraibo.serviceflow.log_readiness >/dev/null
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" ansible-playbook -i localhost, -c local tests/planner_smoke.yml
+          sha256sum "$archive" > build/SHA256SUMS
+
+      - name: Create tag and GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${RELEASE_TAG}" \
+              -f sha="${RELEASE_TARGET_SHA}" >/dev/null
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              build/mraibo-serviceflow-0.2.0.tar.gz \
+              build/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              build/mraibo-serviceflow-0.2.0.tar.gz \
+              build/SHA256SUMS \
+              --verify-tag \
+              --target "$RELEASE_TARGET_SHA" \
+              --title "mraibo.serviceflow 0.2.0" \
+              --notes-from-tag
+          fi
+
+      - name: Publish to Ansible Galaxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GALAXY_TOKEN" || {
+            echo 'ANSIBLE_GALAXY_TOKEN is not configured in the galaxy environment or repository secrets' >&2
+            exit 1
+          }
+          ansible-galaxy collection publish \
+            build/mraibo-serviceflow-0.2.0.tar.gz \
+            --token "$GALAXY_TOKEN"
