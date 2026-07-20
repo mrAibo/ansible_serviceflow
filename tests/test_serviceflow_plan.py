@@ -126,7 +126,7 @@ def main():
         groups,
     )
     expect_error(
-        "ready.interval must not exceed ready.timeout",
+        ".ready.interval must not exceed service",
         [
             {
                 "name": "bad-interval",
