@@ -12,6 +12,7 @@ description:
   - Captures a file identity, byte offset and content anchor before a service transition.
   - Waits only in data written after that boundary.
   - Handles file creation, copy-truncate and rename-based rotation.
+  - Treats bytes already present when a replacement inode is first observed as its new boundary.
 options:
   action:
     description: Capture a boundary or wait from a captured boundary.

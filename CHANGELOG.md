@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.2.2 - 2026-07-21
+
+### Fixed
+
+- prevent historical readiness data already present in a replacement log inode from satisfying the current service start.
+
+### Changed
+
+- treat a replacement inode's observed size as its boundary and scan only subsequent appends.
+
 ## 0.2.1 - 2026-07-21
 
 ### Added
