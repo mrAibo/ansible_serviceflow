@@ -1,7 +1,0 @@
----
-- name: Validate hook phases for {{ serviceflow_preflight_service.name }}
-  ansible.builtin.include_tasks: preflight_phase.yml
-  loop: "{{ serviceflow_preflight_service.hooks | dict2items }}"
-  loop_control:
-    loop_var: serviceflow_preflight_phase
-    label: "{{ serviceflow_preflight_phase.key }}"
