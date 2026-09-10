@@ -20,6 +20,20 @@ Type: boolean. Default: `true`.
 
 Controls privilege escalation for service transitions, readiness operations and hook task files.
 
+### `serviceflow_parallel_hosts`
+
+Type: boolean. Default: `false`.
+
+When enabled, hosts resolved for the current logical service launch their systemd transition concurrently. Service entries themselves always remain strictly ordered. Start therefore preserves declared dependency order and stop preserves exact reverse dependency order.
+
+Pre-transition hooks and log-readiness boundaries are prepared before the parallel transition jobs begin. ServiceFlow waits for all jobs of the current service before running readiness/post-transition handling and before advancing to the next service.
+
+### `serviceflow_parallel_timeout`
+
+Type: integer seconds. Default: `300`.
+
+Maximum runtime for one asynchronous systemd transition when `serviceflow_parallel_hosts` is enabled. This timeout applies only to the service transition job. Readiness uses the timeout declared in each service's `ready` definition.
+
 ### `serviceflow_services`
 
 Type: list of dictionaries. Required and non-empty.
@@ -133,7 +147,7 @@ Hooks run only when the corresponding state transition is needed. They do not ru
 
 Readiness is optional. Without it, ServiceFlow considers a successful `ansible.builtin.systemd_service` call to be the boundary.
 
-Supported types in 0.1.0:
+Supported types:
 
 - `systemd`;
 - `log`.
@@ -193,7 +207,7 @@ When the service is already active, no new startup boundary exists. The log chec
 
 ## Execution order
 
-Services are sequential. Hosts resolved for one service are also processed sequentially. Version 0.1.0 does not execute hosts or services in parallel.
+Services are always sequential. By default, hosts resolved for one service are sequential as well. Set `serviceflow_parallel_hosts: true` to transition hosts of the current service concurrently while preserving the service barrier.
 
 For:
 
@@ -206,26 +220,24 @@ serviceflow_services:
 `start`:
 
 ```text
-first hosts → second hosts
+all first hosts → all second hosts
 ```
 
 `stop`:
 
 ```text
-second hosts → first hosts
+all second hosts → all first hosts
 ```
 
-`restart`:
+With parallel host execution, the hosts represented by each `all ... hosts` stage launch concurrently; the arrow remains a strict barrier.
 
-```text
-all stop phases → all start phases
-```
+`restart` always completes the whole reverse stop phase before the ordered start phase.
 
 ## Failure semantics
 
 The lifecycle stops at the first validation, hook, systemd or readiness error. Later services are not processed.
 
-A unit that started successfully but failed readiness remains started. Version 0.1.0 has no automatic rollback.
+In parallel mode, service transition jobs for the current service may already be in flight when one host reports an error. ServiceFlow waits through the task's normal async handling but does not provide automatic rollback. A unit that started successfully but failed readiness remains started.
 
 ## Check mode
 
@@ -235,6 +247,7 @@ Check mode:
 - returns the planned phases;
 - uses native systemd check-mode prediction;
 - does not execute hooks;
+- does not launch asynchronous service jobs;
 - does not capture log boundaries;
 - does not wait for future readiness events.
 

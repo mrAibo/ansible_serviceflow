@@ -3,3 +3,5 @@ serviceflow_action: start
 serviceflow_services: []
 serviceflow_become: true
 serviceflow_show_plan: false
+serviceflow_parallel_hosts: false
+serviceflow_parallel_timeout: 300

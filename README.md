@@ -5,7 +5,7 @@
 
 Ordered, cross-host systemd lifecycle orchestration for Ansible.
 
-> **Current release:** 0.2.2. It prevents historical data in a replacement log inode from satisfying current-start readiness.
+> **Current release:** 0.3.0. It adds optional parallel transitions for hosts inside one logical service while preserving strict service dependency order.
 
 ServiceFlow manages application stacks whose services live in different inventory groups and must follow one strict lifecycle order. It complements `ansible.builtin.systemd_service`; it does not replace or reimplement it.
 
@@ -19,17 +19,18 @@ ordered service list
 + transition-aware task-file hooks
 + systemd or current-start log readiness
 + automatic reverse stop
++ optional parallel hosts inside one service group
 + redacted structured lifecycle result
 ```
 
-Start follows the declared order. Stop uses the exact reverse order. Restart performs a complete stop sequence followed by a complete start sequence.
+Start follows the declared order. Stop uses the exact reverse order. Restart performs a complete stop sequence followed by a complete start sequence. Service entries always remain sequential. With `serviceflow_parallel_hosts: true`, hosts resolved for the current service start or stop concurrently and ServiceFlow waits for the complete group before advancing to the next service.
 
 ## Installation
 
 Install the current release:
 
 ```bash
-ansible-galaxy collection install mraibo.serviceflow:0.2.2
+ansible-galaxy collection install mraibo.serviceflow:0.3.0
 ```
 
 Recommended `requirements.yml`:
@@ -38,7 +39,7 @@ Recommended `requirements.yml`:
 ---
 collections:
   - name: mraibo.serviceflow
-    version: "0.2.2"
+    version: "0.3.0"
 ```
 
 Requirements:
@@ -58,6 +59,7 @@ Requirements:
   gather_facts: false
   vars:
     serviceflow_action: "{{ requested_action | default('restart') }}"
+    serviceflow_parallel_hosts: true
     serviceflow_services:
       - unit: example-database.service
         groups: database
@@ -86,10 +88,24 @@ Requirements:
 
 When `name` is omitted, ServiceFlow derives it from `unit` by removing only a final `.service` suffix. An explicit name always wins. `groups` and `exclude_groups` accept either one string or a list. Readiness remains a dictionary; the YAML short form `ready: {type: systemd}` is supported without weakening validation.
 
+## Parallel host execution
+
+Parallel host execution is opt-in:
+
+```yaml
+serviceflow_parallel_hosts: true
+serviceflow_parallel_timeout: 300
+```
+
+Only hosts belonging to the **same logical service** transition concurrently. The service dependency order is never relaxed. For a stack declared as ModeShape → ActiveMQ → PMC → Portal, ServiceFlow waits until all ModeShape hosts have completed their transition and readiness checks before it begins ActiveMQ. Stop still uses Portal → PMC → ActiveMQ → ModeShape.
+
+Pre-transition hooks and log-readiness boundaries are prepared before the parallel systemd jobs are launched. ServiceFlow waits for every launched job, then performs readiness and post-transition hooks and records results in stable inventory order. `serviceflow_parallel_timeout` limits the systemd transition job itself and is separate from readiness timeouts.
+
 ## Key behavior
 
-- Services and resolved hosts are processed sequentially.
+- Services are always processed sequentially in declared dependency order.
 - Hosts from multiple groups are merged and deduplicated.
+- Hosts for one service are sequential by default and may optionally transition in parallel.
 - Duplicate combinations of target host and systemd unit are rejected.
 - `exclude_groups` removes maintenance or otherwise excluded hosts.
 - `manage` must evaluate to a boolean and can skip a complete service entry.
@@ -109,7 +125,7 @@ When `name` is omitted, ServiceFlow derives it from `unit` by removing only a fi
 
 ## Result schema
 
-Version 0.2.0 retains schema version 1:
+Version 0.3.0 retains schema version 1:
 
 ```yaml
 serviceflow_result:
@@ -152,7 +168,7 @@ ansible-doc mraibo.serviceflow.log_readiness
 ## Deferred functionality
 
 - arbitrary dependency graphs;
-- parallel or rolling execution;
+- rolling execution and configurable batches;
 - automatic rollback;
 - HTTP, port and journal readiness;
 - `after_start` hooks;

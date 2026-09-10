@@ -1,0 +1,158 @@
+---
+- name: Preview {{ serviceflow_phase.action }} for {{ serviceflow_current_service.name }} hosts
+  ansible.builtin.systemd_service:
+    name: "{{ serviceflow_current_service.unit }}"
+    state: "{{ 'started' if serviceflow_phase.action == 'start' else 'stopped' }}"
+  delegate_to: "{{ serviceflow_parallel_preview_host }}"
+  become: "{{ serviceflow_become }}"
+  check_mode: true
+  loop: "{{ serviceflow_current_service.hosts }}"
+  loop_control:
+    loop_var: serviceflow_parallel_preview_host
+    label: "{{ serviceflow_parallel_preview_host }}"
+  register: serviceflow_parallel_preview_results
+
+- name: Initialize parallel host execution context
+  ansible.builtin.set_fact:
+    serviceflow_parallel_host_contexts: []
+    serviceflow_parallel_log_boundaries: {}
+    serviceflow_parallel_systemd_results: {}
+    serviceflow_parallel_final_states: {}
+
+- name: Build parallel host execution context
+  ansible.builtin.set_fact:
+    serviceflow_parallel_host_contexts: >-
+      {{
+        serviceflow_parallel_host_contexts
+        + [
+            {
+              'host': serviceflow_parallel_preview.serviceflow_parallel_preview_host,
+              'transition_needed': serviceflow_parallel_preview.changed | bool,
+              'initial_active_state': (
+                serviceflow_parallel_preview.status | default({})
+              ).get('ActiveState', 'unknown'),
+              'initial_sub_state': (
+                serviceflow_parallel_preview.status | default({})
+              ).get('SubState', 'unknown')
+            }
+          ]
+      }}
+  loop: "{{ serviceflow_parallel_preview_results.results }}"
+  loop_control:
+    loop_var: serviceflow_parallel_preview
+    label: "{{ serviceflow_parallel_preview.serviceflow_parallel_preview_host }}"
+
+- name: Prepare {{ serviceflow_current_service.name }} hosts before parallel transition
+  ansible.builtin.include_tasks: parallel_prepare_host.yml
+  loop: "{{ serviceflow_parallel_host_contexts }}"
+  loop_control:
+    loop_var: serviceflow_parallel_host_context
+    label: "{{ serviceflow_parallel_host_context.host }}"
+
+- name: Launch {{ serviceflow_phase.action }} for {{ serviceflow_current_service.name }} hosts
+  ansible.builtin.systemd_service:
+    name: "{{ serviceflow_current_service.unit }}"
+    state: "{{ 'started' if serviceflow_phase.action == 'start' else 'stopped' }}"
+  delegate_to: "{{ serviceflow_parallel_launch_host.host }}"
+  become: "{{ serviceflow_become }}"
+  async: "{{ serviceflow_parallel_timeout }}"
+  poll: 0
+  loop: "{{ serviceflow_parallel_host_contexts }}"
+  loop_control:
+    loop_var: serviceflow_parallel_launch_host
+    label: "{{ serviceflow_parallel_launch_host.host }}"
+  register: serviceflow_parallel_launch_results
+  when: not ansible_check_mode
+
+- name: Wait for parallel {{ serviceflow_current_service.name }} transitions
+  ansible.builtin.async_status:
+    jid: "{{ serviceflow_parallel_job.ansible_job_id }}"
+  delegate_to: "{{ serviceflow_parallel_job.serviceflow_parallel_launch_host.host }}"
+  become: "{{ serviceflow_become }}"
+  register: serviceflow_parallel_wait_result
+  until: serviceflow_parallel_wait_result.finished | bool
+  retries: "{{ ((serviceflow_parallel_timeout | int) / 2) | round(0, 'ceil') | int + 1 }}"
+  delay: 2
+  loop: "{{ serviceflow_parallel_launch_results.results | default([]) }}"
+  loop_control:
+    loop_var: serviceflow_parallel_job
+    label: "{{ serviceflow_parallel_job.serviceflow_parallel_launch_host.host }}"
+  when: not ansible_check_mode
+
+- name: Store parallel systemd transition results
+  ansible.builtin.set_fact:
+    serviceflow_parallel_systemd_results: >-
+      {{
+        serviceflow_parallel_systemd_results
+        | combine(
+            {
+              serviceflow_parallel_completed.serviceflow_parallel_job.serviceflow_parallel_launch_host.host:
+                serviceflow_parallel_completed
+            }
+          )
+      }}
+  loop: "{{ serviceflow_parallel_wait_result.results | default([]) }}"
+  loop_control:
+    loop_var: serviceflow_parallel_completed
+    label: >-
+      {{ serviceflow_parallel_completed.serviceflow_parallel_job.serviceflow_parallel_launch_host.host }}
+  when: not ansible_check_mode
+
+- name: Read final systemd state for {{ serviceflow_current_service.name }} hosts
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - --property=ActiveState
+      - --property=SubState
+      - --no-pager
+      - "{{ serviceflow_current_service.unit }}"
+  delegate_to: "{{ serviceflow_parallel_final_host.host }}"
+  become: "{{ serviceflow_become }}"
+  check_mode: false
+  changed_when: false
+  loop: "{{ serviceflow_parallel_host_contexts }}"
+  loop_control:
+    loop_var: serviceflow_parallel_final_host
+    label: "{{ serviceflow_parallel_final_host.host }}"
+  register: serviceflow_parallel_final_results
+  when: not ansible_check_mode
+
+- name: Store final systemd states for parallel hosts
+  ansible.builtin.set_fact:
+    serviceflow_parallel_final_states: >-
+      {{
+        serviceflow_parallel_final_states
+        | combine(
+            {
+              serviceflow_parallel_final.serviceflow_parallel_final_host.host: {
+                'active_state': (
+                  (
+                    serviceflow_parallel_final.stdout_lines
+                    | select('match', '^ActiveState=')
+                    | first
+                  ).split('=', 1)[1]
+                ),
+                'sub_state': (
+                  (
+                    serviceflow_parallel_final.stdout_lines
+                    | select('match', '^SubState=')
+                    | first
+                  ).split('=', 1)[1]
+                )
+              }
+            }
+          )
+      }}
+  loop: "{{ serviceflow_parallel_final_results.results | default([]) }}"
+  loop_control:
+    loop_var: serviceflow_parallel_final
+    label: "{{ serviceflow_parallel_final.serviceflow_parallel_final_host.host }}"
+  when: not ansible_check_mode
+
+- name: Finalize {{ serviceflow_current_service.name }} hosts after parallel transition
+  ansible.builtin.include_tasks: parallel_finalize_host.yml
+  loop: "{{ serviceflow_parallel_host_contexts }}"
+  loop_control:
+    loop_var: serviceflow_parallel_host_context
+    label: "{{ serviceflow_parallel_host_context.host }}"

@@ -84,6 +84,7 @@ jobs:
         run: |
           for playbook in \
             tests/lifecycle.yml \
+            tests/parallel_lifecycle.yml \
             tests/hook_failure.yml \
             tests/missing_hook_preflight.yml \
             tests/readiness_failure.yml \
@@ -104,7 +105,7 @@ jobs:
           cp -a . "$root/"
           cd "$root"
           ansible-test sanity --color no
-      - name: Sequential lifecycle integration
+      - name: Sequential and parallel lifecycle integration
         if: matrix.integration
         shell: bash
         run: |
@@ -156,6 +157,12 @@ jobs:
               -i tests/lifecycle_inventory.ini \
               tests/lifecycle.yml \
               -e requested_action=start
+
+          bash tests/systemd_fixture.sh reset
+          ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \
+            ansible-playbook \
+              -i tests/lifecycle_inventory.ini \
+              tests/parallel_lifecycle.yml
 
           bash tests/systemd_fixture.sh reset
           if ANSIBLE_COLLECTIONS_PATH="$PWD/collections" \

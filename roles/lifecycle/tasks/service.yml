@@ -1,7 +1,12 @@
 ---
-- name: Process {{ serviceflow_current_service.name }} hosts
+- name: Process {{ serviceflow_current_service.name }} hosts sequentially
   ansible.builtin.include_tasks: host.yml
   loop: "{{ serviceflow_current_service.hosts }}"
   loop_control:
     loop_var: serviceflow_target_host
     label: "{{ serviceflow_target_host }}"
+  when: not serviceflow_parallel_hosts | bool
+
+- name: Process {{ serviceflow_current_service.name }} hosts in parallel
+  ansible.builtin.include_tasks: parallel_service.yml
+  when: serviceflow_parallel_hosts | bool

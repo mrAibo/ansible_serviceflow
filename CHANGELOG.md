@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-10
+
+### Added
+
+- add optional `serviceflow_parallel_hosts` execution so hosts belonging to one logical service can start or stop concurrently while service groups remain strictly ordered;
+- add `serviceflow_parallel_timeout` for the asynchronous systemd transition runtime without changing readiness timeout semantics;
+- preserve transition-aware hooks, log-boundary capture, readiness checks, deterministic result ordering and check-mode behavior when parallel host execution is enabled.
+
+### Changed
+
+- document the distinction between strict service ordering and optional parallel execution inside one service group;
+- retain sequential host execution as the default for full backward compatibility.
+
 ## 0.2.2 - 2026-07-21
 
 ### Fixed

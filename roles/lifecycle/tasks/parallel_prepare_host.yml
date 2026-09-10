@@ -1,0 +1,48 @@
+---
+- name: Select parallel target host context
+  ansible.builtin.set_fact:
+    serviceflow_target_host: "{{ serviceflow_parallel_host_context.host }}"
+    serviceflow_transition_needed: "{{ serviceflow_parallel_host_context.transition_needed | bool }}"
+    serviceflow_initial_active_state: "{{ serviceflow_parallel_host_context.initial_active_state }}"
+    serviceflow_initial_sub_state: "{{ serviceflow_parallel_host_context.initial_sub_state }}"
+
+- name: Run hooks before the parallel service transition
+  ansible.builtin.include_tasks: hooks.yml
+  vars:
+    serviceflow_hook_phase: >-
+      {{
+        'before_start'
+        if serviceflow_phase.action == 'start'
+        else 'before_stop'
+      }}
+  when:
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
+- name: Capture log readiness boundary before parallel start
+  mraibo.serviceflow.log_readiness:
+    action: capture
+    path: "{{ serviceflow_current_service.ready.path }}"
+  delegate_to: "{{ serviceflow_target_host }}"
+  become: "{{ serviceflow_become }}"
+  register: serviceflow_log_boundary_result
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'log'
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode
+
+- name: Store parallel log readiness boundary
+  ansible.builtin.set_fact:
+    serviceflow_parallel_log_boundaries: >-
+      {{
+        serviceflow_parallel_log_boundaries
+        | combine({serviceflow_target_host: serviceflow_log_boundary_result})
+      }}
+  when:
+    - serviceflow_phase.action == 'start'
+    - serviceflow_current_service.ready is not none
+    - serviceflow_current_service.ready.type == 'log'
+    - serviceflow_transition_needed | bool
+    - not ansible_check_mode

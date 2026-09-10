@@ -4,7 +4,8 @@ argument_specs:
     short_description: Execute an ordered systemd service lifecycle
     description:
       - Validates and executes ordered start, reverse-order stop, or full restart phases.
-      - Resolves service targets from Ansible inventory groups and processes them sequentially.
+      - Resolves service targets from Ansible inventory groups and processes service groups sequentially.
+      - Hosts within one service may optionally transition in parallel.
       - Supports transition-aware task-file hooks and systemd or new-log-entry readiness.
     options:
       serviceflow_action:
@@ -134,3 +135,16 @@ argument_specs:
           - Hook variable names and values are never included.
         type: bool
         default: false
+      serviceflow_parallel_hosts:
+        description:
+          - Start or stop hosts belonging to the same logical service concurrently.
+          - Service entries themselves remain strictly ordered and stop still reverses that order.
+          - Hooks and preflight preparation are performed before the parallel transition; readiness and result collection follow after the transition jobs have completed.
+        type: bool
+        default: false
+      serviceflow_parallel_timeout:
+        description:
+          - Maximum runtime in seconds for an individual asynchronous systemd transition when parallel host execution is enabled.
+          - This does not replace or change readiness timeouts.
+        type: int
+        default: 300

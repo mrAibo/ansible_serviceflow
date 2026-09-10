@@ -8,6 +8,10 @@ restart of the configured systemd units. It relies on
 `ansible.builtin.systemd_service` for unit transitions and does not reimplement
 systemd operations.
 
+Service entries are always processed in strict order. Hosts belonging to one
+service entry are sequential by default and can optionally transition in
+parallel with `serviceflow_parallel_hosts: true`.
+
 ## Variables
 
 | Variable | Type | Required | Description |
@@ -15,6 +19,9 @@ systemd operations.
 | `serviceflow_action` | string | no, default `start` | `start`, `stop`, or `restart`. |
 | `serviceflow_services` | list of dictionaries | yes | Ordered service definitions. |
 | `serviceflow_become` | boolean | no, default `true` | Use privilege escalation for service, hook, and readiness operations. |
+| `serviceflow_show_plan` | boolean | no, default `false` | Display the redacted lifecycle plan. |
+| `serviceflow_parallel_hosts` | boolean | no, default `false` | Run systemd transitions concurrently for hosts of the same logical service. |
+| `serviceflow_parallel_timeout` | integer | no, default `300` | Maximum runtime in seconds for an individual asynchronous systemd transition. |
 
 ## Service definitions
 
@@ -27,6 +34,17 @@ Each entry supports:
 - `manage`: evaluated boolean that may skip the complete entry;
 - `hooks`: task-file hooks keyed by lifecycle phase;
 - `ready`: optional systemd or new-log-entry readiness definition.
+
+## Execution model
+
+The declared service list is the start order and its exact reverse is the stop
+order. Setting `serviceflow_parallel_hosts: true` changes only execution within
+one service entry: all prepared hosts launch their systemd transition
+concurrently, then ServiceFlow waits for those jobs and performs readiness and
+post-transition handling before moving to the next service entry.
+
+This means a dependency such as database → application → frontend remains
+strict even when each tier contains several hosts.
 
 ## Hooks
 
@@ -60,6 +78,8 @@ effect occurs.
 - name: Manage an application lifecycle
   hosts: localhost
   gather_facts: false
+  vars:
+    serviceflow_parallel_hosts: true
   roles:
     - role: mraibo.serviceflow.lifecycle
 ```

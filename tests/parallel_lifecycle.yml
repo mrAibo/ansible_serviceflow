@@ -1,0 +1,32 @@
+---
+- name: Verify ServiceFlow parallel host execution
+  hosts: orchestrator
+  gather_facts: false
+  vars:
+    serviceflow_action: start
+    serviceflow_parallel_hosts: true
+    serviceflow_parallel_timeout: 30
+    serviceflow_services:
+      - name: alpha-parallel
+        groups:
+          - alpha
+          - beta
+        unit: serviceflow-alpha.service
+        ready:
+          type: systemd
+          active_state: active
+          sub_state: exited
+          timeout: 5
+          interval: 1
+  roles:
+    - role: mraibo.serviceflow.lifecycle
+  tasks:
+    - name: Verify deterministic result after parallel execution
+      ansible.builtin.assert:
+        that:
+          - serviceflow_result.processed | length == 2
+          - serviceflow_result.processed | map(attribute='service') | list == ['alpha-parallel', 'alpha-parallel']
+          - serviceflow_result.processed | map(attribute='host') | list == ['alpha_host', 'beta_host']
+          - serviceflow_result.processed | map(attribute='action') | unique | list == ['start']
+          - serviceflow_result.readiness | length == 2
+          - serviceflow_result.readiness | map(attribute='host') | list == ['alpha_host', 'beta_host']
