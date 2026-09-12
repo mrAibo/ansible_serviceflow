@@ -1,11 +1,17 @@
 ---
-- name: Preview {{ serviceflow_phase.action }} for {{ serviceflow_current_service.name }} hosts
-  ansible.builtin.systemd_service:
-    name: "{{ serviceflow_current_service.unit }}"
-    state: "{{ 'started' if serviceflow_phase.action == 'start' else 'stopped' }}"
+- name: Read initial {{ serviceflow_current_service.name }} states
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - --property=ActiveState
+      - --property=SubState
+      - --no-pager
+      - "{{ serviceflow_current_service.unit }}"
   delegate_to: "{{ serviceflow_parallel_preview_host }}"
   become: "{{ serviceflow_become }}"
-  check_mode: true
+  check_mode: false
+  changed_when: false
   loop: "{{ serviceflow_current_service.hosts }}"
   loop_control:
     loop_var: serviceflow_parallel_preview_host
@@ -27,13 +33,37 @@
         + [
             {
               'host': serviceflow_parallel_preview.serviceflow_parallel_preview_host,
-              'transition_needed': serviceflow_parallel_preview.changed | bool,
+              'transition_needed': (
+                (
+                  serviceflow_phase.action == 'start'
+                  and
+                  (
+                    serviceflow_parallel_preview.stdout_lines
+                    | select('match', '^ActiveState=')
+                    | first
+                  ).split('=', 1)[1] != 'active'
+                )
+                or
+                (
+                  serviceflow_phase.action == 'stop'
+                  and
+                  (
+                    serviceflow_parallel_preview.stdout_lines
+                    | select('match', '^ActiveState=')
+                    | first
+                  ).split('=', 1)[1] != 'inactive'
+                )
+              ),
               'initial_active_state': (
-                serviceflow_parallel_preview.status | default({})
-              ).get('ActiveState', 'unknown'),
+                serviceflow_parallel_preview.stdout_lines
+                | select('match', '^ActiveState=')
+                | first
+              ).split('=', 1)[1],
               'initial_sub_state': (
-                serviceflow_parallel_preview.status | default({})
-              ).get('SubState', 'unknown')
+                serviceflow_parallel_preview.stdout_lines
+                | select('match', '^SubState=')
+                | first
+              ).split('=', 1)[1]
             }
           ]
       }}
@@ -50,9 +80,12 @@
     label: "{{ serviceflow_parallel_host_context.host }}"
 
 - name: Launch {{ serviceflow_phase.action }} for {{ serviceflow_current_service.name }} hosts
-  ansible.builtin.systemd_service:
-    name: "{{ serviceflow_current_service.unit }}"
-    state: "{{ 'started' if serviceflow_phase.action == 'start' else 'stopped' }}"
+  ansible.builtin.command:
+    argv: >-
+      {{
+        serviceflow_systemctl_prefix
+        + ['systemctl', serviceflow_phase.action, serviceflow_current_service.unit]
+      }}
   delegate_to: "{{ serviceflow_parallel_launch_host.host }}"
   become: "{{ serviceflow_become }}"
   async: "{{ serviceflow_parallel_timeout }}"
@@ -62,7 +95,10 @@
     loop_var: serviceflow_parallel_launch_host
     label: "{{ serviceflow_parallel_launch_host.host }}"
   register: serviceflow_parallel_launch_results
-  when: not ansible_check_mode
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - serviceflow_parallel_launch_host.transition_needed | bool
 
 - name: Wait for parallel {{ serviceflow_current_service.name }} transitions
   ansible.builtin.async_status:
@@ -73,7 +109,13 @@
   until: serviceflow_parallel_wait_result.finished | bool
   retries: "{{ ((serviceflow_parallel_timeout | int) / 2) | round(0, 'ceil') | int + 1 }}"
   delay: 2
-  loop: "{{ serviceflow_parallel_launch_results.results | default([]) }}"
+  loop: >-
+    {{
+      serviceflow_parallel_launch_results.results
+      | default([])
+      | selectattr('ansible_job_id', 'defined')
+      | list
+    }}
   loop_control:
     loop_var: serviceflow_parallel_job
     label: "{{ serviceflow_parallel_job.serviceflow_parallel_launch_host.host }}"
